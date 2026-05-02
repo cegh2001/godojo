@@ -96,12 +96,26 @@ func NewEmbedExerciseRepo() *EmbedExerciseRepo {
 }
 
 // GetBySlug retrieves an exercise by topic slug and exercise slug.
+// If topicSlug is empty, it searches all topics for a matching exercise.
 func (r *EmbedExerciseRepo) GetBySlug(ctx context.Context, topicSlug, exerciseSlug string) (*domain.Exercise, error) {
-	cacheKey := topicSlug + "/" + exerciseSlug
-	if ex, ok := r.cache[cacheKey]; ok {
-		return ex, nil
+	// If topicSlug is provided, do a direct lookup
+	if topicSlug != "" {
+		cacheKey := topicSlug + "/" + exerciseSlug
+		if ex, ok := r.cache[cacheKey]; ok {
+			return ex, nil
+		}
+		return nil, fmt.Errorf("ejercicio %q no encontrado en el tema %q", exerciseSlug, topicSlug)
 	}
-	return nil, fmt.Errorf("ejercicio %q no encontrado en el tema %q", exerciseSlug, topicSlug)
+
+	// Search all topics for the exercise
+	for _, exercises := range r.registry {
+		for _, ex := range exercises {
+			if ex.Slug == exerciseSlug {
+				return ex, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("ejercicio %q no encontrado", exerciseSlug)
 }
 
 // ListByTopic returns exercise references for a given topic.

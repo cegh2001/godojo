@@ -260,6 +260,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.currentTopic = topic
 			m.state = stateTopicDetail
 			m.cursor = 0
+			m.err = nil
 
 			// Load exercises for this topic
 			exercises, err := m.exerciseSvc.GetExercisesByTopic(topic.Slug)

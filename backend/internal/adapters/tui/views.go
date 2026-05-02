@@ -50,7 +50,16 @@ func (m Model) viewTopicDetail() string {
 
 	sb.WriteString(titleStyle.Render(topic.Title) + "\n")
 	sb.WriteString(helpStyle.Render(topic.Description) + "\n\n")
+
+	if m.err != nil {
+		sb.WriteString(failStyle.Render(fmt.Sprintf("Error: %v", m.err)) + "\n\n")
+	}
+
 	sb.WriteString(helpStyle.Render("Ejercicios:") + "\n")
+
+	if len(m.exercises) == 0 {
+		sb.WriteString(helpStyle.Render("  (no hay ejercicios disponibles para este tema)\n"))
+	}
 
 	for i, ex := range m.exercises {
 		cursor := "  "

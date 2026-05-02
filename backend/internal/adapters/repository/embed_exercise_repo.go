@@ -214,7 +214,9 @@ func (r *EmbedExerciseRepo) GenerateFiles(ctx context.Context, exercise *domain.
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			return fmt.Errorf("no se pudo crear el directorio para %s: %w", filename, err)
 		}
-		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		// Strip //go:build ignore so the exercise can compile
+		cleaned := stripBuildIgnore(content)
+		if err := os.WriteFile(p, []byte(cleaned), 0644); err != nil {
 			return fmt.Errorf("no se pudo escribir %s: %w", filename, err)
 		}
 	}
@@ -226,4 +228,19 @@ func (r *EmbedExerciseRepo) GenerateFiles(ctx context.Context, exercise *domain.
 	}
 
 	return nil
+}
+
+// stripBuildIgnore removes the //go:build ignore directive from generated files.
+// The embedded templates need this directive to avoid being compiled as part of GoDojo,
+// but exercise files generated for the user must be compilable.
+func stripBuildIgnore(content string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "//go:build ignore" {
+		// Remove the build tag and the following empty line if present
+		if len(lines) > 1 && lines[1] == "" {
+			return strings.Join(lines[2:], "\n")
+		}
+		return strings.Join(lines[1:], "\n")
+	}
+	return content
 }

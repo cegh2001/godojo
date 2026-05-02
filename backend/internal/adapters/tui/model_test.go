@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -293,7 +294,8 @@ func TestModel_HandleTestResultMsg(t *testing.T) {
 
 func TestModel_HandleHintResultMsg(t *testing.T) {
 	m := newModelTest()
-	m.state = stateTestRunning // hint arrives during/after test
+	m.state = stateTestRunning
+	m.hintRequested = true
 
 	h := &domain.Hint{Content: "Probaste usando un loop?"}
 	newM, _ := m.Update(hintResultMsg{hint: h})
@@ -305,22 +307,25 @@ func TestModel_HandleHintResultMsg(t *testing.T) {
 	if updated.hintResult.Content != "Probaste usando un loop?" {
 		t.Errorf("hint content = %q, want %q", updated.hintResult.Content, "Probaste usando un loop?")
 	}
+	if updated.hintRequested {
+		t.Error("hintRequested should be cleared after receiving result")
+	}
 }
 
 func TestModel_HandleHintErrorMsg(t *testing.T) {
 	m := newModelTest()
 	m.state = stateTestRunning
+	m.hintRequested = true
 
-	newM, _ := m.Update(hintErrorMsg{err: nil})
+	newM, _ := m.Update(hintErrorMsg{err: fmt.Errorf("timeout")})
 	updated := newM.(Model)
 
-	// State should transition to hintDisplay even on error
-	if updated.state != stateHintDisplay {
-		t.Errorf("state after hint error = %v, want %v", updated.state, stateHintDisplay)
+	// Hint messages update the hint fields but don't change state
+	if updated.hintError == nil {
+		t.Error("hintError should be set")
 	}
-	// previousView should be saved for back navigation
-	if updated.previousView != stateTestRunning {
-		t.Errorf("previousView after hint error = %v, want %v", updated.previousView, stateTestRunning)
+	if updated.hintRequested {
+		t.Error("hintRequested should be cleared after receiving error")
 	}
 }
 

@@ -29,12 +29,12 @@ func (m *mockHintProvider) GetHint(ctx context.Context, exercise *domain.Exercis
 	go func() {
 		if !m.available {
 			errCh <- fmt.Errorf("hints unavailable: no API key configured")
+			close(errCh)
 		} else {
 			time.Sleep(m.delay)
 			hintCh <- &domain.Hint{Content: "¿Probaste verificar tu implementación paso a paso?"}
+			close(hintCh)
 		}
-		close(hintCh)
-		close(errCh)
 	}()
 
 	return hintCh, errCh

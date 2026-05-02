@@ -1,8 +1,12 @@
 package gemini
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -23,13 +27,17 @@ type HintProvider struct {
 }
 
 // NewHintProvider creates a HintProvider using the GEMINI_API_KEY environment variable.
-// Returns a provider that will return an error if the API key is not configured.
+// Uses the Gemini API via direct HTTP (no genai dependency).
 func NewHintProvider() *HintProvider {
 	apiKey := os.Getenv("GEMINI_API_KEY")
-	return &HintProvider{
+	p := &HintProvider{
 		apiKey:  apiKey,
 		timeout: 15 * time.Second,
 	}
+	if apiKey != "" {
+		p.client = &realGeminiClient{apiKey: apiKey}
+	}
+	return p
 }
 
 // NewHintProviderWithClient creates a HintProvider with a pre-configured client (for testing).
@@ -128,4 +136,83 @@ func buildSocraticPrompt(exercise *domain.Exercise, testOutput string) string {
 	sb.WriteString("Usá voseo (español rioplatense).")
 
 	return sb.String()
+}
+
+// realGeminiClient implements GeminiClient using direct HTTP calls to the Gemini API.
+type realGeminiClient struct {
+	apiKey     string
+	httpClient *http.Client
+}
+
+func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (string, error) {
+	if c.httpClient == nil {
+		c.httpClient = &http.Client{Timeout: 15 * time.Second}
+	}
+
+	// Gemini API endpoint
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=%s",
+		c.apiKey,
+	)
+
+	body := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.7,
+			"maxOutputTokens": 300,
+		},
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("error al preparar la solicitud: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("error al crear la solicitud HTTP: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error al consultar Gemini: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("error al leer la respuesta: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("Gemini API devolvió error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse the response
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("error al interpretar la respuesta de Gemini: %w", err)
+	}
+
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("Gemini no devolvió contenido")
+	}
+
+	return result.Candidates[0].Content.Parts[0].Text, nil
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -67,14 +68,15 @@ type Model struct {
 	currentExercise *domain.Exercise
 
 	// UI state
-	cursor     int // selected item index
-	testResult *domain.TestResult
-	hintResult *domain.Hint
-	hintError  error
-	spinner    spinner.Model
-	width      int
-	height     int
-	err        error
+	cursor        int // selected item index
+	testResult    *domain.TestResult
+	hintResult    *domain.Hint
+	hintError     error
+	hintRequested bool // true while waiting for hint, false when user navigates away
+	spinner       spinner.Model
+	width         int
+	height        int
+	err           error
 
 	// Content lists for views
 	phases    []*domain.Phase
@@ -181,15 +183,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleTestResult(msg)
 
 	case hintResultMsg:
+		if !m.hintRequested {
+			return m, nil // user navigated away, ignore
+		}
 		m.hintResult = msg.hint
-		m.previousView = m.state
-		m.state = stateHintDisplay
+		m.hintRequested = false
 		return m, nil
 
 	case hintErrorMsg:
+		if !m.hintRequested {
+			return m, nil // user navigated away, ignore
+		}
 		m.hintError = msg.err
-		m.previousView = m.state
-		m.state = stateHintDisplay
+		m.hintRequested = false
 		return m, nil
 
 	case spinner.TickMsg:
@@ -248,6 +254,7 @@ func (m Model) handleEsc() (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		return m, nil
 	case stateHintDisplay:
+		m.hintRequested = false
 		m.state = m.previousView
 		m.hintError = nil
 		return m, nil
@@ -348,7 +355,9 @@ func (m Model) handleCtrlH() (tea.Model, tea.Cmd) {
 	if m.state == stateTestResults && m.testResult != nil && !m.testResult.Passed {
 		m.state = stateHintDisplay
 		m.previousView = stateTestResults
+		m.hintRequested = true
 		if m.hintSvc == nil || m.currentExercise == nil {
+			m.hintError = fmt.Errorf("servicio de pistas no disponible")
 			return m, nil
 		}
 		cmd := fetchHintCmd(m.hintSvc, m.currentExercise, m.lastTestOutput)

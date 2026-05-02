@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,6 +19,17 @@ import (
 )
 
 func main() {
+	// 0. Load .env file from project root (one level up from backend/)
+	loadEnv("..")
+
+	// Check if Gemini API key is loaded
+	if os.Getenv("GEMINI_API_KEY") != "" {
+		fmt.Fprintf(os.Stderr, "🔑 Gemini API key cargada del .env\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "⚠️  GEMINI_API_KEY no encontrada. Las pistas del sensei no estarán disponibles.\n")
+		fmt.Fprintf(os.Stderr, "   Creá un archivo .env en la raíz del proyecto con: GEMINI_API_KEY=tu-key\n")
+	}
+
 	// 1. Set up progress directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -53,5 +66,36 @@ func main() {
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// loadEnv reads a .env file and sets environment variables.
+// Only sets vars that aren't already set in the environment.
+func loadEnv(envDir string) {
+	envPath := filepath.Join(envDir, ".env")
+	f, err := os.Open(envPath)
+	if err != nil {
+		return // .env is optional
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Skip comments and empty lines
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Parse KEY=VALUE
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		// Only set if not already in environment
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
 	}
 }

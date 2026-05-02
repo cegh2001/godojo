@@ -149,10 +149,11 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 		c.httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 
-	// Gemini API endpoint
+	// Gemini API endpoint — uses gemini-2.5-flash for fast hints
+	model := "gemini-2.5-flash"
 	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=%s",
-		c.apiKey,
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+		model, c.apiKey,
 	)
 
 	body := map[string]interface{}{

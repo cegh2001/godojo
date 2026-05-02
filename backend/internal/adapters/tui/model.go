@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -300,8 +301,12 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			ctx := context.Background()
 			exerciseDir := m.workspacePath + "/" + ex.TopicSlug + "/" + ex.Slug
 			if err := m.exerciseRepo.GenerateFiles(ctx, ex, exerciseDir); err != nil {
-				// File already exists is OK — user already generated them
-				m.err = err
+				// File already exists is OK — user already has them, just show as info
+				if strings.Contains(err.Error(), "ya existen") {
+					m.err = nil // clear, not a real error
+				} else {
+					m.err = err
+				}
 			}
 
 			m.state = stateExerciseView

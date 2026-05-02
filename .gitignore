@@ -1,0 +1,47 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Build output
+/backend/godojo
+/backend/cmd/godojo/godojo
+
+# Dependencies
+node_modules/
+.next/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# GoDojo user workspace (generated at runtime)
+~/.godojo/
+
+# Go build cache
+*.exe~
+
+# Temporary files
+*.tmp
+*.temp

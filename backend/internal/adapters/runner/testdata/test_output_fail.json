@@ -1,0 +1,12 @@
+{"Time":"2026-01-01T00:00:00Z","Action":"run","Package":"ejercicio","Test":"TestSuma"}
+{"Time":"2026-01-01T00:00:00Z","Action":"output","Package":"ejercicio","Test":"TestSuma","Output":"=== RUN   TestSuma\n"}
+{"Time":"2026-01-01T00:00:01Z","Action":"output","Package":"ejercicio","Test":"TestSuma","Output":"--- FAIL: TestSuma (0.00s)\n"}
+{"Time":"2026-01-01T00:00:01Z","Action":"output","Package":"ejercicio","Test":"TestSuma","Output":"\tejercicio_test.go:10: got 5, want 4\n"}
+{"Time":"2026-01-01T00:00:01Z","Action":"fail","Package":"ejercicio","Test":"TestSuma","Elapsed":0.001}
+{"Time":"2026-01-01T00:00:01Z","Action":"run","Package":"ejercicio","Test":"TestResta"}
+{"Time":"2026-01-01T00:00:01Z","Action":"output","Package":"ejercicio","Test":"TestResta","Output":"=== RUN   TestResta\n"}
+{"Time":"2026-01-01T00:00:02Z","Action":"output","Package":"ejercicio","Test":"TestResta","Output":"--- PASS: TestResta (0.00s)\n"}
+{"Time":"2026-01-01T00:00:02Z","Action":"pass","Package":"ejercicio","Test":"TestResta","Elapsed":0.001}
+{"Time":"2026-01-01T00:00:02Z","Action":"output","Package":"ejercicio","Output":"FAIL\n"}
+{"Time":"2026-01-01T00:00:02Z","Action":"output","Package":"ejercicio","Output":"FAIL\tejercicio\t0.002s\n"}
+{"Time":"2026-01-01T00:00:02Z","Action":"fail","Package":"ejercicio","Elapsed":0.002}

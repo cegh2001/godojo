@@ -337,7 +337,8 @@ func (m Model) handleCtrlT() (tea.Model, tea.Cmd) {
 		if m.testRunner == nil {
 			return m, nil
 		}
-		cmd := runTestsCmd(m.testRunner, m.workspacePath)
+		exerciseDir := m.exercisePath()
+		cmd := runTestsCmd(m.testRunner, exerciseDir)
 		return m, cmd
 	}
 	return m, nil

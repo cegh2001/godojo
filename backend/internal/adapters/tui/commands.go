@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -13,8 +14,8 @@ import (
 // It accepts a TestRunner interface to actually run the tests.
 func runTestsCmd(runner ports.TestRunner, workspace string) tea.Cmd {
 	return func() tea.Msg {
-		// Use background context with timeout
-		result, err := runner.Run(nil, workspace)
+		ctx := context.Background()
+		result, err := runner.Run(ctx, workspace)
 		if err != nil {
 			return testResultMsg{
 				result: &domain.TestResult{

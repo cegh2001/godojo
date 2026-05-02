@@ -4,63 +4,83 @@ package main
 
 import "testing"
 
-func TestSumarEnteros(t *testing.T) {
+func TestConvertirAMayusculas(t *testing.T) {
 	tests := []struct {
-		a, b     int
-		esperado int
-	}{
-		{2, 3, 5},
-		{0, 0, 0},
-		{-1, 1, 0},
-		{-5, -3, -8},
-		{100, 200, 300},
-	}
-
-	for _, tt := range tests {
-		resultado := SumarEnteros(tt.a, tt.b)
-		if resultado != tt.esperado {
-			t.Errorf("SumarEnteros(%d, %d) = %d, esperado %d", tt.a, tt.b, resultado, tt.esperado)
-		}
-	}
-}
-
-func TestConcatenar(t *testing.T) {
-	tests := []struct {
-		a, b     string
+		entrada  string
 		esperado string
 	}{
-		{"Hola", "Mundo", "HolaMundo"},
-		{"", "", ""},
-		{"Go", "", "Go"},
-		{"", "Go", "Go"},
-		{"🚀", "Go", "🚀Go"},
+		{"hola", "HOLA"},
+		{"Go", "GO"},
+		{"Gopher", "GOPHER"},
+		{"", ""},
+		{"aBc", "ABC"},
 	}
 
 	for _, tt := range tests {
-		resultado := Concatenar(tt.a, tt.b)
+		resultado := ConvertirAMayusculas(tt.entrada)
 		if resultado != tt.esperado {
-			t.Errorf("Concatenar(%q, %q) = %q, esperado %q", tt.a, tt.b, resultado, tt.esperado)
+			t.Errorf("ConvertirAMayusculas(%q) = %q, se esperaba %q", tt.entrada, resultado, tt.esperado)
 		}
 	}
 }
 
-func TestEsMayorDeEdad(t *testing.T) {
+func TestEsPositivo(t *testing.T) {
 	tests := []struct {
-		edad     int
+		n        int
 		esperado bool
 	}{
-		{18, true},
-		{21, true},
-		{17, false},
+		{5, true},
+		{1, true},
 		{0, false},
 		{-1, false},
-		{100, true},
+		{-100, false},
 	}
 
 	for _, tt := range tests {
-		resultado := EsMayorDeEdad(tt.edad)
+		resultado := EsPositivo(tt.n)
 		if resultado != tt.esperado {
-			t.Errorf("EsMayorDeEdad(%d) = %v, esperado %v", tt.edad, resultado, tt.esperado)
+			t.Errorf("EsPositivo(%d) = %v, se esperaba %v", tt.n, resultado, tt.esperado)
+		}
+	}
+}
+
+func TestRedondear(t *testing.T) {
+	tests := []struct {
+		f        float64
+		esperado int
+	}{
+		{3.4, 3},
+		{3.5, 4},
+		{3.6, 4},
+		{0.0, 0},
+		{0.2, 0},
+		{0.5, 1},
+		{0.9, 1},
+	}
+
+	for _, tt := range tests {
+		resultado := Redondear(tt.f)
+		if resultado != tt.esperado {
+			t.Errorf("Redondear(%g) = %d, se esperaba %d", tt.f, resultado, tt.esperado)
+		}
+	}
+}
+
+func TestLongitudDeString(t *testing.T) {
+	tests := []struct {
+		s        string
+		esperado int
+	}{
+		{"hola", 4},
+		{"Go", 2},
+		{"", 0},
+		{"🚀", 4}, // los emojis ocupan más de un byte
+	}
+
+	for _, tt := range tests {
+		resultado := LongitudDeString(tt.s)
+		if resultado != tt.esperado {
+			t.Errorf("LongitudDeString(%q) = %d, se esperaba %d", tt.s, resultado, tt.esperado)
 		}
 	}
 }

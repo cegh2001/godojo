@@ -2,19 +2,26 @@
 
 package main
 
-// FizzBuzz genera una lista de strings del 1 al n donde:
-// - Los múltiplos de 3 se reemplazan por "Fizz"
-// - Los múltiplos de 5 se reemplazan por "Buzz"
-// - Los múltiplos de ambos (15) se reemplazan por "FizzBuzz"
-// Si n es menor a 1, devuelve un slice vacío.
-func FizzBuzz(n int) []string {
-	// TODO: Implementar el algoritmo FizzBuzz
-	return nil
+// ClasificarNumero devuelve "positivo", "negativo" o "cero" según el valor de n.
+// Pista: usá if / else if / else.
+func ClasificarNumero(n int) string {
+	// TODO: Implementar usando if/else
+	return ""
 }
 
-// EsPrimo devuelve true si n es un número primo.
-// Los números menores a 2 no son primos.
-func EsPrimo(n int) bool {
-	// TODO: Implementar la verificación de número primo
-	return false
+// SumarHasta devuelve la suma de todos los números desde 1 hasta n.
+// Ejemplo: SumarHasta(3) = 1 + 2 + 3 = 6
+// Si n es 0 o menor, devuelve 0.
+// Pista: usá un bucle for para acumular la suma en una variable.
+func SumarHasta(n int) int {
+	// TODO: Implementar usando un for loop
+	return 0
+}
+
+// DiaDeLaSemana devuelve el nombre del día según el número (1 = Lunes, 7 = Domingo).
+// Para cualquier número fuera de 1..7, devuelve "Número inválido".
+// Pista: usá switch / case.
+func DiaDeLaSemana(n int) string {
+	// TODO: Implementar usando switch
+	return ""
 }

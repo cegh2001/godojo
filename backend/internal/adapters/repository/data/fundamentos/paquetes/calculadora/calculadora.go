@@ -3,14 +3,14 @@
 package calculadora
 
 // Sumar retorna la suma de dos números enteros.
-// Esta función es exportada (visible desde otros paquetes).
+// Esta función es exportada (empieza con mayúscula) y se puede usar desde otros paquetes.
 func Sumar(a, b int) int {
 	// TODO: Implementar la suma de a y b
 	return 0
 }
 
 // validar verifica que el número sea no negativo.
-// Esta función NO es exportada (solo visible dentro del paquete calculadora).
+// Esta función NO es exportada (empieza con minúscula), solo se puede usar dentro del paquete calculadora.
 func validar(n int) bool {
 	// TODO: Implementar validación (retornar true si n >= 0)
 	return false

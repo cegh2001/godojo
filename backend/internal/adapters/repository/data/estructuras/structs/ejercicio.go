@@ -2,52 +2,35 @@
 
 package main
 
-import "math"
-
-// Figura es una interfaz para formas geométricas.
-type Figura interface {
-	Area() float64
-	Perimetro() float64
-}
-
 // Rectangulo representa un rectángulo con ancho y alto.
 type Rectangulo struct {
 	Ancho float64
 	Alto  float64
 }
 
-// Area calcula el área del rectángulo.
+// Area calcula el área del rectángulo (ancho × alto).
+// Este es un método de Rectangulo — notá el "receiver" (r Rectangulo) antes del nombre.
 func (r Rectangulo) Area() float64 {
-	// TODO: Implementar área = ancho * alto
+	// TODO: Devolver r.Ancho * r.Alto
 	return 0
 }
 
-// Perimetro calcula el perímetro del rectángulo.
+// Perimetro calcula el perímetro del rectángulo (2 × (ancho + alto)).
 func (r Rectangulo) Perimetro() float64 {
-	// TODO: Implementar perímetro = 2 * (ancho + alto)
+	// TODO: Devolver 2 * (r.Ancho + r.Alto)
 	return 0
 }
 
-// Circulo representa un círculo con un radio.
-type Circulo struct {
-	Radio float64
+// EsCuadrado determina si un rectángulo es un cuadrado (ancho == alto).
+// Esta es una función normal, no un método.
+func EsCuadrado(r Rectangulo) bool {
+	// TODO: Comparar r.Ancho y r.Alto
+	return false
 }
 
-// Area calcula el área del círculo.
-func (c Circulo) Area() float64 {
-	// TODO: Implementar área = π * radio²
-	_ = math.Pi // Pista: usá math.Pi
-	return 0
-}
-
-// Perimetro calcula el perímetro (circunferencia) del círculo.
-func (c Circulo) Perimetro() float64 {
-	// TODO: Implementar perímetro = 2 * π * radio
-	return 0
-}
-
-// CalcularAreaTotal suma el área de todas las figuras en el slice.
-func CalcularAreaTotal(figuras []Figura) float64 {
-	// TODO: Recorrer las figuras y sumar sus áreas
-	return 0
+// NuevoRectangulo es un constructor que crea y devuelve un Rectangulo.
+// Los constructores en Go suelen llamarse NuevoXxx o NewXxx.
+func NuevoRectangulo(ancho, alto float64) Rectangulo {
+	// TODO: Crear y devolver un Rectangulo con los valores recibidos
+	return Rectangulo{}
 }

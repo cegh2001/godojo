@@ -2,27 +2,33 @@
 
 package main
 
-import (
-	"testing"
-)
+import "testing"
 
-func TestUsarPaqueteCalculadora(t *testing.T) {
-	// Verificamos que podemos llamar a la función exportada Sumar
-	resultado := UsarSuma(5, 3)
-	if resultado != 8 {
-		t.Errorf("UsarSuma(5, 3) = %d, esperado 8", resultado)
+func TestUsarSuma(t *testing.T) {
+	tests := []struct {
+		a, b     int
+		esperado int
+	}{
+		{5, 3, 8},
+		{10, 20, 30},
+		{-1, 1, 0},
+		{0, 0, 0},
+		{-5, -3, -8},
 	}
 
-	resultado = UsarSuma(-1, 1)
-	if resultado != 0 {
-		t.Errorf("UsarSuma(-1, 1) = %d, esperado 0", resultado)
+	for _, tt := range tests {
+		resultado := UsarSuma(tt.a, tt.b)
+		if resultado != tt.esperado {
+			t.Errorf("UsarSuma(%d, %d) = %d, se esperaba %d", tt.a, tt.b, resultado, tt.esperado)
+		}
 	}
 }
 
-func TestCalculadoraValidar_EsVisible(t *testing.T) {
-	// Verificamos que la función Sumar funciona correctamente
-	resultado := UsarSuma(10, 20)
-	if resultado != 30 {
-		t.Errorf("UsarSuma(10, 20) = %d, esperado 30", resultado)
+func TestUsarSuma_LlamaAlPaquete(t *testing.T) {
+	// Verifica que la función UsarSuma efectivamente llama al paquete calculadora.
+	// Si el paquete no está implementado correctamente, este test falla.
+	resultado := UsarSuma(100, 50)
+	if resultado != 150 {
+		t.Errorf("UsarSuma(100, 50) = %d, se esperaba 150. ¿Importaste y usaste el paquete calculadora?", resultado)
 	}
 }

@@ -26,18 +26,18 @@ type exerciseMeta struct {
 
 // exerciseManifest lists all exercises available in the platform.
 var exerciseManifest = []exerciseMeta{
-	// Fase 1: Fundamentos
+	// Fase 1: Fundamentos (orden progresivo — cada tema usa solo conceptos ya enseñados)
 	{slug: "hola-mundo", title: "¡Hola, Gopher!", topicSlug: "variables", difficulty: domain.DifficultyEasy, dir: "data/fundamentos/hola-mundo"},
 	{slug: "variables", title: "Declaración de Variables", topicSlug: "variables", difficulty: domain.DifficultyEasy, dir: "data/fundamentos/variables"},
-	{slug: "tipos", title: "Tipos Básicos y Conversiones", topicSlug: "tipos", difficulty: domain.DifficultyEasy, dir: "data/fundamentos/tipos"},
-	{slug: "funciones", title: "Funciones y Múltiples Retornos", topicSlug: "funciones", difficulty: domain.DifficultyMedium, dir: "data/fundamentos/funciones"},
-	{slug: "paquetes", title: "Paquetes y Visibilidad", topicSlug: "packages", difficulty: domain.DifficultyMedium, dir: "data/fundamentos/paquetes"},
+	{slug: "tipos", title: "Tipos y Conversiones", topicSlug: "tipos", difficulty: domain.DifficultyEasy, dir: "data/fundamentos/tipos"},
 	{slug: "control-flujo", title: "Control de Flujo", topicSlug: "control-de-flujo", difficulty: domain.DifficultyMedium, dir: "data/fundamentos/control-flujo"},
+	{slug: "funciones", title: "Funciones y Retornos", topicSlug: "funciones", difficulty: domain.DifficultyMedium, dir: "data/fundamentos/funciones"},
+	{slug: "paquetes", title: "Paquetes y Visibilidad", topicSlug: "packages", difficulty: domain.DifficultyMedium, dir: "data/fundamentos/paquetes"},
 	// Fase 2: Estructuras de Datos
 	{slug: "arrays", title: "Arrays en Go", topicSlug: "arrays", difficulty: domain.DifficultyEasy, dir: "data/estructuras/arrays"},
 	{slug: "slices", title: "Slices y Operaciones", topicSlug: "slices", difficulty: domain.DifficultyMedium, dir: "data/estructuras/slices"},
 	{slug: "maps", title: "Maps en Go", topicSlug: "maps", difficulty: domain.DifficultyMedium, dir: "data/estructuras/maps"},
-	{slug: "structs", title: "Structs y Métodos", topicSlug: "structs", difficulty: domain.DifficultyHard, dir: "data/estructuras/structs"},
+	{slug: "structs", title: "Structs y Métodos", topicSlug: "structs", difficulty: domain.DifficultyMedium, dir: "data/estructuras/structs"},
 }
 
 // extraFiles defines additional files to write alongside the main ejercicio.go

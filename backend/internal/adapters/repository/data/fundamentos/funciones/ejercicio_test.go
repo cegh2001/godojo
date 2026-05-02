@@ -9,16 +9,16 @@ import (
 
 func TestDividir(t *testing.T) {
 	tests := []struct {
-		a, b         float64
-		esperado     float64
-		debeFallar   bool
+		a, b       float64
+		esperado   float64
+		debeFallar bool
 	}{
 		{10, 2, 5, false},
 		{7, 2, 3.5, false},
 		{0, 5, 0, false},
 		{-10, 2, -5, false},
-		{5, 0, 0, true},   // división por cero debe devolver error
-		{0, 0, 0, true},   // división por cero debe devolver error
+		{5, 0, 0, true}, // división por cero
+		{0, 0, 0, true}, // división por cero
 	}
 
 	for _, tt := range tests {
@@ -32,46 +32,50 @@ func TestDividir(t *testing.T) {
 				t.Errorf("Dividir(%g, %g) error inesperado: %v", tt.a, tt.b, err)
 			}
 			if math.Abs(resultado-tt.esperado) > 0.0001 {
-				t.Errorf("Dividir(%g, %g) = %g, esperado %g", tt.a, tt.b, resultado, tt.esperado)
+				t.Errorf("Dividir(%g, %g) = %g, se esperaba %g", tt.a, tt.b, resultado, tt.esperado)
 			}
 		}
 	}
 }
 
-func TestEstadisticas(t *testing.T) {
+func TestEsMayor(t *testing.T) {
 	tests := []struct {
-		nums      []int
-		min, max  int
-		promedio  int
-		esperaErr bool
+		a, b     int
+		esperado int
 	}{
-		{[]int{1, 2, 3, 4, 5}, 1, 5, 3, false},
-		{[]int{10}, 10, 10, 10, false},
-		{[]int{-5, 0, 5}, -5, 5, 0, false},
-		{[]int{7, 7, 7}, 7, 7, 7, false},
-		{[]int{}, 0, 0, 0, true}, // slice vacío debe dar error
+		{5, 3, 5},
+		{3, 5, 5},
+		{7, 7, 7},
+		{-1, -5, -1},
+		{0, -10, 0},
 	}
 
 	for _, tt := range tests {
-		min, max, promedio, err := Estadisticas(tt.nums)
-		if tt.esperaErr {
-			if err == nil {
-				t.Errorf("Estadisticas(%v) debería devolver error para slice vacío", tt.nums)
-			}
-			continue
+		resultado := EsMayor(tt.a, tt.b)
+		if resultado != tt.esperado {
+			t.Errorf("EsMayor(%d, %d) = %d, se esperaba %d", tt.a, tt.b, resultado, tt.esperado)
 		}
-		if err != nil {
-			t.Errorf("Estadisticas(%v) error inesperado: %v", tt.nums, err)
-			continue
-		}
-		if min != tt.min {
-			t.Errorf("Estadisticas(%v) min = %d, esperado %d", tt.nums, min, tt.min)
-		}
-		if max != tt.max {
-			t.Errorf("Estadisticas(%v) max = %d, esperado %d", tt.nums, max, tt.max)
-		}
-		if promedio != tt.promedio {
-			t.Errorf("Estadisticas(%v) promedio = %d, esperado %d", tt.nums, promedio, tt.promedio)
+	}
+}
+
+func TestSaludoPersonalizado(t *testing.T) {
+	tests := []struct {
+		nombre   string
+		idioma   string
+		esperado string
+	}{
+		{"Gopher", "es", "¡Hola, Gopher!"},
+		{"Gopher", "en", "Hello, Gopher!"},
+		{"Gopher", "fr", "Bonjour, Gopher!"},
+		{"Mundo", "es", "¡Hola, Mundo!"},
+		{"Mundo", "en", "Hello, Mundo!"},
+		{"", "es", "¡Hola, !"},
+	}
+
+	for _, tt := range tests {
+		resultado := SaludoPersonalizado(tt.nombre, tt.idioma)
+		if resultado != tt.esperado {
+			t.Errorf("SaludoPersonalizado(%q, %q) = %q, se esperaba %q", tt.nombre, tt.idioma, resultado, tt.esperado)
 		}
 	}
 }

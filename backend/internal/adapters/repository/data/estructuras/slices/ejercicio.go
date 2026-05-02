@@ -2,21 +2,24 @@
 
 package main
 
-// FiltrarPares devuelve un slice con solo los números pares del slice original.
+// FiltrarPares devuelve un nuevo slice con solo los números pares del slice original.
+// Pista: recorré con for range y usá append para agregar los pares a un slice nuevo.
 func FiltrarPares(nums []int) []int {
-	// TODO: Recorrer el slice y agregar los números pares a un nuevo slice
+	// TODO: Crear un slice vacío y agregar los números pares con append
 	return nil
 }
 
-// EliminarDuplicados devuelve un slice sin elementos duplicados,
-// manteniendo el orden de primera aparición.
-func EliminarDuplicados(nums []int) []int {
-	// TODO: Usar un map para rastrear elementos vistos y eliminar duplicados
+// Concatenar devuelve un nuevo slice con todos los elementos de a seguidos de b.
+// Pista: usá append para combinar slices. Recordá usar ... para expandir un slice.
+func Concatenar(a, b []int) []int {
+	// TODO: Usar append(a, b...) para concatenar
 	return nil
 }
 
-// ConcatenarSlices devuelve un nuevo slice con todos los elementos de a seguidos de b.
-func ConcatenarSlices(a, b []int) []int {
-	// TODO: Crear un slice nuevo con append
-	return nil
+// ContieneSlice verifica si un valor existe en un slice.
+// Retorna true si el valor está presente, false en caso contrario.
+// Es similar a la función Contiene que hiciste con arrays, pero ahora con slices.
+func ContieneSlice(nums []int, valor int) bool {
+	// TODO: Recorrer el slice con for range y comparar cada elemento
+	return false
 }

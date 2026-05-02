@@ -15,6 +15,6 @@ func UsarSuma(a, b int) int {
 }
 
 func main() {
-	fmt.Println("Ejercicio de paquetes — importá y usá el paquete calculadora")
-	fmt.Println("Resultado:", UsarSuma(5, 3))
+	fmt.Println("Ejercicio de paquetes: importá y usá el paquete calculadora")
+	fmt.Println("Suma de 5 + 3:", UsarSuma(5, 3))
 }

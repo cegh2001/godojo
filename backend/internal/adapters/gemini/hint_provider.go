@@ -166,7 +166,7 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 		},
 		"generationConfig": map[string]interface{}{
 			"temperature":     0.7,
-			"maxOutputTokens": 300,
+			"maxOutputTokens": 800,
 		},
 	}
 

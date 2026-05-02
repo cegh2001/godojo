@@ -29,11 +29,25 @@ func (s *stubRoadmapService) GetTopicBySlug(slug string) (*domain.Topic, error) 
 	return nil, nil
 }
 
-// NewModelTest creates a Model for testing with a stub roadmap.
+// stubExerciseService returns empty exercises for testing.
+type stubExerciseService struct{}
+
+func (s *stubExerciseService) StartExercise(slug string) (*domain.Exercise, error) {
+	return nil, nil
+}
+func (s *stubExerciseService) GetExercisesByTopic(topicSlug string) ([]*domain.ExerciseRef, error) {
+	return nil, nil
+}
+func (s *stubExerciseService) ValidateExercise(slug string, testResult *domain.TestResult) (bool, error) {
+	return false, nil
+}
+
+// newModelTest creates a Model for testing with stub services.
 func newModelTest() Model {
 	return Model{
-		roadmapSvc: &stubRoadmapService{},
-		state:      stateRoadmapView,
+		roadmapSvc:   &stubRoadmapService{},
+		exerciseSvc:  &stubExerciseService{},
+		state:        stateRoadmapView,
 	}
 }
 

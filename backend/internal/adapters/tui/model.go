@@ -254,12 +254,20 @@ func (m Model) handleEsc() (tea.Model, tea.Cmd) {
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	switch m.state {
 	case stateRoadmapView:
-		// Select the topic at cursor
+		// Select the topic at cursor and load its exercises
 		if m.cursor >= 0 && m.cursor < len(m.topics) {
 			topic := m.topics[m.cursor]
 			m.currentTopic = topic
 			m.state = stateTopicDetail
 			m.cursor = 0
+
+			// Load exercises for this topic
+			exercises, err := m.exerciseSvc.GetExercisesByTopic(topic.Slug)
+			if err != nil {
+				m.err = err
+				return m, nil
+			}
+			m.exercises = exercises
 			return m, nil
 		}
 	case stateTopicDetail:

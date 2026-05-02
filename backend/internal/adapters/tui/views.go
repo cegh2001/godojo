@@ -82,10 +82,24 @@ func (m Model) viewExercise() string {
 	}
 
 	sb.WriteString(titleStyle.Render(ex.Title) + "\n\n")
+
+	if m.err != nil {
+		sb.WriteString(failStyle.Render(fmt.Sprintf("Error: %v", m.err)) + "\n\n")
+	}
+
+	sb.WriteString(helpStyle.Render(fmt.Sprintf("📁 Archivos en: %s\n\n", m.exercisePath())))
 	sb.WriteString(helpStyle.Render("ctrl+t: ejecutar tests  ctrl+h: pedir pista  esc: volver") + "\n\n")
-	sb.WriteString(helpStyle.Render("El ejercicio se encuentra en tu workspace."))
+	sb.WriteString(helpStyle.Render("Abrí ejercicio.go en tu editor, completá los // TODO y volvé acá."))
 
 	return sb.String()
+}
+
+// exercisePath returns the full path to the current exercise's workspace directory.
+func (m Model) exercisePath() string {
+	if m.currentExercise == nil {
+		return m.workspacePath
+	}
+	return m.workspacePath + "/" + m.currentExercise.TopicSlug + "/" + m.currentExercise.Slug
 }
 
 func (m Model) viewTestRunning() string {

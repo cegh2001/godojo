@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
 	"godojo/internal/core/domain"
@@ -81,6 +83,7 @@ type Model struct {
 
 	// For command execution
 	testRunner     ports.TestRunner
+	exerciseRepo   ports.ExerciseRepository
 	workspacePath  string
 	lastTestOutput string
 }
@@ -116,13 +119,14 @@ type hintErrorMsg struct {
 	err error
 }
 
-// NewModel creates a new TUI Model with the given services, test runner, and workspace.
+// NewModel creates a new TUI Model with the given services, test runner, repo, and workspace.
 func NewModel(
 	roadmapSvc roadmapService,
 	exerciseSvc exerciseService,
 	progressSvc progressService,
 	hintSvc hintService,
 	testRunner ports.TestRunner,
+	exerciseRepo ports.ExerciseRepository,
 	workspacePath string,
 ) Model {
 	sp := spinner.New()
@@ -136,6 +140,7 @@ func NewModel(
 		progressSvc:   progressSvc,
 		hintSvc:       hintSvc,
 		testRunner:    testRunner,
+		exerciseRepo:  exerciseRepo,
 		workspacePath: workspacePath,
 		spinner:       sp,
 	}
@@ -272,15 +277,26 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case stateTopicDetail:
-		// Select the exercise at cursor
+		// Select the exercise at cursor and generate its files
 		if m.cursor >= 0 && m.cursor < len(m.exercises) {
 			ref := m.exercises[m.cursor]
+			m.err = nil
+
 			ex, err := m.exerciseSvc.StartExercise(ref.Slug)
 			if err != nil {
 				m.err = err
 				return m, nil
 			}
 			m.currentExercise = ex
+
+			// Generate exercise files in workspace
+			ctx := context.Background()
+			exerciseDir := m.workspacePath + "/" + ex.TopicSlug + "/" + ex.Slug
+			if err := m.exerciseRepo.GenerateFiles(ctx, ex, exerciseDir); err != nil {
+				// File already exists is OK — user already generated them
+				m.err = err
+			}
+
 			m.state = stateExerciseView
 			m.cursor = 0
 			return m, nil

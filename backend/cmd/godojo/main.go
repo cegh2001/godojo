@@ -46,7 +46,7 @@ func main() {
 	workspacePath := filepath.Join(homeDir, "godojo", "exercises")
 
 	// 5. Create TUI model
-	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, workspacePath)
+	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, exerciseRepo, workspacePath)
 
 	// 6. Run Bubbletea
 	p := tea.NewProgram(model, tea.WithAltScreen())

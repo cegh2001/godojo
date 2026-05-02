@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -42,11 +43,25 @@ func (s *stubExerciseService) ValidateExercise(slug string, testResult *domain.T
 	return false, nil
 }
 
+// stubExerciseRepo is a minimal ExerciseRepository for tests.
+type stubExerciseRepo struct{}
+
+func (s *stubExerciseRepo) GetBySlug(ctx context.Context, topicSlug, slug string) (*domain.Exercise, error) {
+	return nil, nil
+}
+func (s *stubExerciseRepo) ListByTopic(ctx context.Context, topicSlug string) ([]*domain.ExerciseRef, error) {
+	return nil, nil
+}
+func (s *stubExerciseRepo) GenerateFiles(ctx context.Context, exercise *domain.Exercise, workspacePath string) error {
+	return nil
+}
+
 // newModelTest creates a Model for testing with stub services.
 func newModelTest() Model {
 	return Model{
 		roadmapSvc:   &stubRoadmapService{},
 		exerciseSvc:  &stubExerciseService{},
+		exerciseRepo: &stubExerciseRepo{},
 		state:        stateRoadmapView,
 	}
 }
@@ -647,13 +662,14 @@ func TestNewModel_AcceptsTestRunnerAndWorkspacePath(t *testing.T) {
 		result: &domain.TestResult{Passed: true},
 	}
 
-	// WHEN: NewModel is called with 6 params
+	// WHEN: NewModel is called with 7 params
 	m := NewModel(
 		&stubRoadmapService{},
 		nil, // exerciseSvc
 		nil, // progressSvc
 		nil, // hintSvc
 		runner,
+		nil, // exerciseRepo
 		"/custom/workspace",
 	)
 

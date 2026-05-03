@@ -101,6 +101,9 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 			"temperature":     0.7,
 			"maxOutputTokens": 2000,
 		},
+		"thinkingConfig": map[string]interface{}{
+			"thinkingBudget": 0, // disable chain-of-thought for faster chat responses
+		},
 	}
 
 	jsonBody, err := json.Marshal(body)

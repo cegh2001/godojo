@@ -11,10 +11,6 @@ import (
 )
 
 func (m Model) handleCtrlG() (tea.Model, tea.Cmd) {
-	if m.state != stateSenseiChat && m.state != stateSessionSelector {
-		m.previousView = m.state
-	}
-
 	m.state = stateSenseiChat
 	m.chatPrunedMsg = ""
 
@@ -56,18 +52,17 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 		m.chatSessionID = chatstore.NewSessionID()
 	}
 
-	now := timeNow()
-	m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
-		Role:    "user",
-		Content: input,
-		Time:    now,
-	})
-
 	m.chatInput = ""
 	m.chatLoading = true
 	m.chatScroll = 0
 
-	if m.chatProvider == nil {
+	if m.senseiSvc == nil {
+		now := timeNow()
+		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
+			Role:    "user",
+			Content: input,
+			Time:    now,
+		})
 		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
 			Role:    "sensei",
 			Content: "Sensei no disponible — configura GEMINI_API_KEY en .env",
@@ -78,21 +73,34 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m, m.sendChatCmd()
+	return m, m.sendSenseiCmd(input)
 }
 
-func (m Model) sendChatCmd() tea.Cmd {
+func (m Model) sendSenseiCmd(userMessage string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		response, err := m.chatProvider.SendMessage(ctx, "", m.chatMessages)
-		if err != nil {
-			if response != "" {
-				return chatResponseMsg{content: response, err: err}
-			}
-			return chatResponseMsg{content: err.Error(), err: err}
+
+		session := &chatstore.ChatSession{
+			ID:       m.chatSessionID,
+			Messages: m.chatMessages,
 		}
 
-		return chatResponseMsg{content: response, err: nil}
+		response, statusUpdates, err := m.senseiSvc.ProcessMessage(ctx, m.senseiSystemPrompt, userMessage, session)
+
+		// Drain status updates in background if channel exists
+		if statusUpdates != nil {
+			go func() {
+				for status := range statusUpdates {
+					_ = status // status updates handled via toolStatusMsg in Update
+				}
+			}()
+		}
+
+		if err != nil {
+			return senseiResponseMsg{content: err.Error(), err: err}
+		}
+
+		return senseiResponseMsg{content: response, err: nil}
 	}
 }
 
@@ -148,6 +156,8 @@ func (m Model) handleSessionSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
 	case "esc":
 		return m.handleEsc()
 	case "enter":
@@ -229,6 +239,23 @@ func (m Model) handleChatSessionsLoaded(msg chatSessionsLoadedMsg) (tea.Model, t
 		m.chatSessions = nil
 	} else {
 		m.chatSessions = msg.sessions
+	}
+	return m, nil
+}
+
+// handleCursorUp moves the cursor up by one position.
+func (m Model) handleCursorUp() (tea.Model, tea.Cmd) {
+	if m.cursor > 0 {
+		m.cursor--
+	}
+	return m, nil
+}
+
+// handleCursorDown moves the cursor down by one position.
+func (m Model) handleCursorDown() (tea.Model, tea.Cmd) {
+	maxLen := m.getCursorMax()
+	if m.cursor < maxLen-1 {
+		m.cursor++
 	}
 	return m, nil
 }

@@ -196,14 +196,14 @@ func TestViewSenseiChat_ShowsHelpBar(t *testing.T) {
 	m.height = 24
 
 	view := m.View()
-	if !strings.Contains(view, "Ctrl+N: nuevo chat") {
-		t.Error("chat view should show 'Ctrl+N: nuevo chat' help")
+	if !strings.Contains(view, "Ctrl+N") {
+		t.Error("chat view should show 'Ctrl+N' help")
 	}
-	if !strings.Contains(view, "Ctrl+L: sesiones") {
-		t.Error("chat view should show 'Ctrl+L: sesiones' help")
+	if !strings.Contains(view, "Ctrl+L") {
+		t.Error("chat view should show 'Ctrl+L' help")
 	}
-	if !strings.Contains(view, "Esc: volver") {
-		t.Error("chat view should show 'Esc: volver' help")
+	if !strings.Contains(view, "Ctrl+C: salir") {
+		t.Error("chat view should show 'Ctrl+C: salir' help")
 	}
 }
 

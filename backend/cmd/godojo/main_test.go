@@ -1,15 +1,14 @@
 package main
 
 import (
-	"os"
 	"testing"
-	"time"
 
 	"godojo/internal/adapters/gemini"
 	"godojo/internal/adapters/repository"
-	"godojo/internal/adapters/runner"
 	"godojo/internal/adapters/store"
 	"godojo/internal/adapters/tui"
+	"godojo/internal/adapters/workspace"
+	"godojo/internal/core"
 	"godojo/internal/core/services"
 )
 
@@ -18,11 +17,9 @@ func TestWiring_NoPanic(t *testing.T) {
 	// This verifies all constructors work and type assertions pass.
 
 	// 1. Create adapters (real implementations)
-	// Use temp dir for progress store
 	tmpDir := t.TempDir()
 	progressPath := tmpDir + "/progress.json"
 	progressStore := store.NewJSONProgressStore(progressPath)
-	testRunner := runner.NewGoTestRunner(30 * time.Second)
 	exerciseRepo := repository.NewEmbedExerciseRepo()
 	hintProvider := gemini.NewHintProvider()
 
@@ -46,53 +43,19 @@ func TestWiring_NoPanic(t *testing.T) {
 		t.Fatal("hintSvc is nil")
 	}
 
-	// 3. Create TUI model — should not panic
-	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, nil, t.TempDir(), nil, nil)
+	// 3. Create SenseiService
+	chatProviderInstance := gemini.NewChatProvider()
+	toolRegistry := core.NewToolRegistry()
+	workspacePath := t.TempDir()
+	workspaceManager := workspace.NewWorkspaceManager(workspacePath)
+	senseiSvc := services.NewSenseiService(chatProviderInstance, toolRegistry, workspaceManager, roadmapSvc)
 
-	// 4. Verify model is initialized
+	// 4. Create TUI model — should not panic
+	model := tui.NewModel(senseiSvc, nil, "")
+
+	// 5. Verify model is initialized
 	if model.Init() == nil {
 		t.Fatal("model.Init() returned nil command")
-	}
-}
-
-func TestWiring_MissingGeminiAPIKey_DoesNotCrash(t *testing.T) {
-	// Remove GEMINI_API_KEY to simulate missing key
-	oldKey := os.Getenv("GEMINI_API_KEY")
-	os.Unsetenv("GEMINI_API_KEY")
-	defer func() {
-		if oldKey != "" {
-			os.Setenv("GEMINI_API_KEY", oldKey)
-		}
-	}()
-
-	// Creating HintProvider without API key should NOT panic
-	hintProvider := gemini.NewHintProvider()
-	if hintProvider == nil {
-		t.Fatal("hintProvider should not be nil even without API key")
-	}
-
-	// Creating HintService with the provider should NOT panic
-	hintSvc := services.NewHintService(hintProvider)
-	if hintSvc == nil {
-		t.Fatal("hintSvc should not be nil")
-	}
-
-	// The full TUI model wiring should NOT panic
-	tmpDir := t.TempDir()
-	progressStore := store.NewJSONProgressStore(tmpDir + "/progress.json")
-	testRunner := runner.NewGoTestRunner(30 * time.Second)
-	exerciseRepo := repository.NewEmbedExerciseRepo()
-
-	roadmapSvc := services.NewRoadmapService()
-	exerciseSvc := services.NewExerciseService(exerciseRepo)
-	progressSvc := services.NewProgressService(progressStore)
-
-	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, nil, t.TempDir(), nil, nil)
-
-	// Init should still work (hint degradation is expected)
-	cmd := model.Init()
-	if cmd == nil {
-		t.Fatal("model.Init() returned nil command even without API key")
 	}
 }
 
@@ -112,7 +75,6 @@ func TestRoadmapLoading_Works(t *testing.T) {
 
 func TestExerciseRepo_HasExercises(t *testing.T) {
 	repo := repository.NewEmbedExerciseRepo()
-	// The repository should have exercises under real topic slugs matching RoadmapService
 	refs, err := repo.ListByTopic(nil, "variables")
 	if err != nil {
 		t.Fatalf("ListByTopic error: %v", err)

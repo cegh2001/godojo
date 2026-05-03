@@ -6,7 +6,8 @@ import (
 	"godojo/internal/core/domain"
 )
 
-// HintProvider generates Socratic hints using AI (Gemini).
+// Deprecated: HintProvider will be removed in sensei-first v2.
+// Replaced by SenseiService's agentic Socratic tutoring.
 type HintProvider interface {
 	// GetHint requests a hint for a failed exercise. Returns channels for async delivery.
 	// The hint channel delivers the hint when ready, the error channel signals failures.

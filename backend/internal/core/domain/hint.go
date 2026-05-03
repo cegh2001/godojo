@@ -1,3 +1,5 @@
+// Deprecated: Hint will be removed in sensei-first v2.
+// Replaced by SenseiService's conversational Socratic guidance.
 package domain
 
 import (

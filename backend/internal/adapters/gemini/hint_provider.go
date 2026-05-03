@@ -217,8 +217,15 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 		return "", fmt.Errorf("Gemini no devolvió contenido")
 	}
 
-	// Filter only text parts, ignore thought parts (chain-of-thought reasoning)
-	text := extractTextOnly(result.Candidates[0].Content.Parts)
+	// Filter only text parts, ignore thought parts (chain-of-thought reasoning) and functionCalls
+	parts := extractContentParts(result.Candidates[0].Content.Parts)
+	var texts []string
+	for _, part := range parts {
+		if part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	text := strings.Join(texts, "\n")
 	if text == "" {
 		return "", fmt.Errorf("Gemini no devolvió contenido")
 	}

@@ -1,3 +1,5 @@
+// Deprecated: TestResult will be removed in sensei-first v2.
+// Replaced by Gemma's CodeExecution tool output (Phase 2).
 package domain
 
 import (

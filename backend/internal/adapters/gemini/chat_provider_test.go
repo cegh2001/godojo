@@ -8,7 +8,19 @@ import (
 
 	"godojo/internal/adapters/chatstore"
 	"godojo/internal/adapters/gemini"
+	"godojo/internal/core/domain"
 )
+
+// partsToText joins text content parts into a single string for backward-compatible assertions.
+func partsToText(parts []domain.ContentPart) string {
+	var texts []string
+	for _, p := range parts {
+		if p.Text != "" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
 
 func TestChatProvider_SendMessage_NoAPIKey_ReturnsUserFriendlyError(t *testing.T) {
 	// Create provider with empty key by unsetting env for this test
@@ -17,7 +29,7 @@ func TestChatProvider_SendMessage_NoAPIKey_ReturnsUserFriendlyError(t *testing.T
 	provider := gemini.NewChatProvider()
 	ctx := context.Background()
 
-	response, err := provider.SendMessage(ctx, "", nil)
+	response, err := provider.SendMessage(ctx, "", nil, nil)
 
 	if err == nil {
 		t.Fatal("expected error when no API key configured")
@@ -27,8 +39,8 @@ func TestChatProvider_SendMessage_NoAPIKey_ReturnsUserFriendlyError(t *testing.T
 		t.Errorf("error should mention GEMINI_API_KEY: %v", err)
 	}
 
-	if response != "" {
-		t.Errorf("response should be empty on error, got: %q", response)
+	if len(response) != 0 {
+		t.Errorf("response should be empty on error, got: %v", response)
 	}
 }
 
@@ -43,10 +55,11 @@ func TestChatProvider_SendMessage_Timeout(t *testing.T) {
 	// This will timeout because the HTTP request can't complete in 1ns
 	response, _ := provider.SendMessage(ctx, "", []chatstore.ChatMessage{
 		{Role: "user", Content: "Hola", Time: time.Now()},
-	})
+	}, nil)
 
-	// Should return a user-friendly error message string, not a bare error (graceful degradation)
-	if response == "" {
+	// Should return a user-friendly error message in a ContentPart (graceful degradation)
+	text := partsToText(response)
+	if text == "" {
 		t.Log("timeout produced empty response — acceptable for 1ns timeout")
 	}
 }
@@ -74,11 +87,12 @@ func TestChatProvider_HistoryIncluded(t *testing.T) {
 		{Role: "user", Content: "¿Hay alguna diferencia con las interfaces de otros lenguajes?", Time: time.Now()},
 	}
 
-	response, _ := provider.SendMessage(ctx, "", history)
+	response, _ := provider.SendMessage(ctx, "", history, nil)
 
 	// Will fail because of fake key, but shouldn't panic
-	if response != "" {
-		t.Logf("unexpected response with fake key: %q", response)
+	text := partsToText(response)
+	if text != "" {
+		t.Logf("unexpected response with fake key: %q", text)
 	}
 }
 
@@ -88,7 +102,7 @@ func TestChatProvider_EmptyHistory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	response, err := provider.SendMessage(ctx, "", nil)
+	response, err := provider.SendMessage(ctx, "", nil, nil)
 
 	// With fake key and short timeout, we expect graceful degradation
 	if err != nil {
@@ -104,7 +118,7 @@ func TestChatProvider_CustomSystemPrompt(t *testing.T) {
 	defer cancel()
 
 	customPrompt := "Sos un asistente de prueba."
-	_, _ = provider.SendMessage(ctx, customPrompt, nil)
+	_, _ = provider.SendMessage(ctx, customPrompt, nil, nil)
 	// Should not panic with custom prompt
 }
 
@@ -120,6 +134,6 @@ func TestChatProvider_RoleMapping(t *testing.T) {
 		{Role: "user", Content: "Otra pregunta", Time: time.Now()},
 	}
 
-	_, _ = provider.SendMessage(ctx, "", history)
+	_, _ = provider.SendMessage(ctx, "", history, nil)
 	// Should not panic — verifies role mapping logic doesn't crash
 }

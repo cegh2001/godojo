@@ -53,7 +53,7 @@ func (m Model) viewSenseiChat() string {
 	sb.WriteString("\n" + m.renderChatStatusLine())
 
 	// Help bar
-	sb.WriteString("\n" + helpStyle.Render("Ctrl+N: nuevo chat | Ctrl+L: sesiones | Esc: volver"))
+	sb.WriteString("\n" + helpStyle.Render("Ctrl+N: nuevo | Ctrl+L: sesiones | Esc: sesiones | Ctrl+C: salir"))
 
 	return sb.String()
 }
@@ -386,7 +386,7 @@ func (m Model) viewSessionSelector() string {
 		))
 	}
 
-	sb.WriteString("\n" + helpStyle.Render("enter: cargar sesión  del: eliminar  esc: volver"))
+	sb.WriteString("\n" + helpStyle.Render("enter: cargar  del: eliminar  esc: volver  q: salir"))
 	return sb.String()
 }
 

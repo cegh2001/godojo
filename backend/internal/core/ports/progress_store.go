@@ -6,7 +6,8 @@ import (
 	"godojo/internal/core/domain"
 )
 
-// ProgressStore persists and retrieves user progress.
+// Deprecated: ProgressStore will be removed in sensei-first v2.
+// Replaced by chat session history as the source of truth for learning progress.
 type ProgressStore interface {
 	// Load returns all progress entries from persistent storage.
 	Load(ctx context.Context) (map[string]*domain.Progress, error)

@@ -1,105 +1,45 @@
 package tui
 
 import (
-	"context"
 	"time"
 
 	"godojo/internal/adapters/chatstore"
-	"godojo/internal/core/domain"
-	"godojo/internal/core/ports"
+	"godojo/internal/core/services"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// timeNow returns the current time. Exists for testability.
+var timeNow = func() time.Time { return time.Now() }
+
 // tuiState represents the current view state in the TUI state machine.
 type tuiState int
 
 const (
-	stateRoadmapView     tuiState = iota // browsing phases/topics
-	stateTopicDetail                     // viewing topic info + exercises
-	stateExerciseView                    // viewing exercise description
-	stateTestRunning                     // spinner while tests run
-	stateTestResults                     // showing test output
-	stateHintDisplay                     // showing Socratic hint
-	stateSenseiChat                      // chat with AI sensei
+	stateSenseiChat      tuiState = iota // default landing, chat with sensei
+	stateToolRunning                     // spinner during agent loop
 	stateSessionSelector                 // session list overlay
 )
-
-// roadmapService defines the interface for roadmap operations.
-type roadmapService interface {
-	GetRoadmap() (*domain.Roadmap, error)
-	GetTopicBySlug(slug string) (*domain.Topic, error)
-}
-
-// exerciseService defines the interface for exercise operations.
-type exerciseService interface {
-	StartExercise(slug string) (*domain.Exercise, error)
-	GetExercisesByTopic(topicSlug string) ([]*domain.ExerciseRef, error)
-	ValidateExercise(slug string, testResult *domain.TestResult) (bool, error)
-}
-
-// progressService defines the interface for progress operations.
-type progressService interface {
-	MarkStarted(exerciseSlug string) error
-	MarkCompleted(exerciseSlug string) error
-	GetCompletionPercent(topicSlug string) (float64, error)
-	GetProgress(exerciseSlug string) (*domain.Progress, error)
-	GetAllProgress() (map[string]*domain.Progress, error)
-}
-
-// hintService defines the interface for hint operations.
-type hintService interface {
-	RequestHint(exercise *domain.Exercise, testOutput string) (<-chan *domain.Hint, <-chan error)
-	IsAvailable() bool
-}
-
-// chatProvider defines the interface for chat AI operations.
-type chatProvider interface {
-	SendMessage(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage) (string, error)
-}
 
 // Model is the main Bubbletea model for the GoDojo TUI.
 type Model struct {
 	// State machine
-	state        tuiState
-	previousView tuiState // used for back navigation from transient states
+	state tuiState
 
-	// Services (wired via constructor)
-	roadmapSvc  roadmapService
-	exerciseSvc exerciseService
-	progressSvc progressService
-	hintSvc     hintService
-
-	// Current context
-	roadmap         *domain.Roadmap
-	currentTopic    *domain.Topic
-	currentExercise *domain.Exercise
+	// Core services
+	senseiSvc          *services.SenseiService
+	senseiSystemPrompt string
+	toolStatus         string // current tool status for ToolRunning view
 
 	// UI state
-	cursor        int // selected item index
-	testResult    *domain.TestResult
-	hintResult    *domain.Hint
-	hintError     error
-	hintRequested bool // true while waiting for hint, false when user navigates away
-	spinner       spinner.Model
-	width         int
-	height        int
-	err           error
-
-	// Content lists for views
-	phases    []*domain.Phase
-	topics    []*domain.Topic
-	exercises []*domain.ExerciseRef
-
-	// For command execution
-	testRunner     ports.TestRunner
-	exerciseRepo   ports.ExerciseRepository
-	workspacePath  string
-	lastTestOutput string
+	cursor  int // selected item index
+	spinner spinner.Model
+	width   int
+	height  int
+	err     error
 
 	// Sensei chat
-	chatProvider  chatProvider
 	chatStore     *chatstore.ChatStore
 	chatSessions  []chatstore.ChatSession
 	chatMessages  []chatstore.ChatMessage
@@ -110,35 +50,15 @@ type Model struct {
 	chatPrunedMsg string // notification about pruned session
 }
 
-// roadmapLoadedMsg is sent when the roadmap is loaded from RoadmapService.
-type roadmapLoadedMsg struct {
-	roadmap *domain.Roadmap
+// toolStatusMsg carries a status update during agent loop.
+type toolStatusMsg struct {
+	status string
 }
 
-// topicSelectedMsg is sent when the user selects a topic.
-type topicSelectedMsg struct {
-	topic *domain.Topic
-}
-
-// exerciseSelectedMsg is sent when the user selects an exercise.
-type exerciseSelectedMsg struct {
-	exercise *domain.Exercise
-}
-
-// testResultMsg is sent when go test completes.
-type testResultMsg struct {
-	result *domain.TestResult
-	err    error
-}
-
-// hintResultMsg is sent when a hint arrives from the provider.
-type hintResultMsg struct {
-	hint *domain.Hint
-}
-
-// hintErrorMsg is sent when hint fetching fails.
-type hintErrorMsg struct {
-	err error
+// senseiResponseMsg carries the final response from the sensei.
+type senseiResponseMsg struct {
+	content string
+	err     error
 }
 
 // chatResponseMsg is sent when the sensei responds.
@@ -153,56 +73,51 @@ type chatSessionsLoadedMsg struct {
 	err      error
 }
 
-// NewModel creates a new TUI Model with the given services, test runner, repo, workspace, and chat dependencies.
+// NewModel creates a new TUI Model with SenseiService and chat dependencies.
 func NewModel(
-	roadmapSvc roadmapService,
-	exerciseSvc exerciseService,
-	progressSvc progressService,
-	hintSvc hintService,
-	testRunner ports.TestRunner,
-	exerciseRepo ports.ExerciseRepository,
-	workspacePath string,
+	senseiSvc *services.SenseiService,
 	chatStore *chatstore.ChatStore,
-	chatProv chatProvider,
+	senseiSystemPrompt string,
 ) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = spinnerStyle
 
 	return Model{
-		state:         stateRoadmapView,
-		roadmapSvc:    roadmapSvc,
-		exerciseSvc:   exerciseSvc,
-		progressSvc:   progressSvc,
-		hintSvc:       hintSvc,
-		testRunner:    testRunner,
-		exerciseRepo:  exerciseRepo,
-		workspacePath: workspacePath,
-		spinner:       sp,
-		chatStore:     chatStore,
-		chatProvider:  chatProv,
+		state:              stateSenseiChat,
+		senseiSvc:          senseiSvc,
+		chatStore:          chatStore,
+		senseiSystemPrompt: senseiSystemPrompt,
+		spinner:            sp,
 	}
 }
 
-// Init returns the initial command: load the roadmap.
+// Init returns the initial command.
 func (m Model) Init() tea.Cmd {
-	return func() tea.Msg {
-		rm, err := m.roadmapSvc.GetRoadmap()
-		if err != nil {
-			return roadmapLoadedMsg{} // handle error gracefully
-		}
-		return roadmapLoadedMsg{roadmap: rm}
-	}
+	return m.spinner.Tick
 }
 
 // Update handles messages and updates the model state.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// When in sensei chat or session selector, handle text input first
-		if m.state == stateSenseiChat && (msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace) {
-			return m.handleChatTextInput(msg)
+		// Global quit: Ctrl+C always works
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
 		}
+
+		// SenseiChat key handling
+		if m.state == stateSenseiChat {
+			// Esc goes to session list
+			if msg.String() == "esc" {
+				return m.handleChatList()
+			}
+			// Text input: route to chat handler
+			if msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace {
+				return m.handleChatTextInput(msg)
+			}
+		}
+
 		return m.handleKeyMsg(msg)
 
 	case tea.WindowSizeMsg:
@@ -210,33 +125,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
-	case roadmapLoadedMsg:
-		return m.handleRoadmapLoaded(msg)
+	case toolStatusMsg:
+		m.toolStatus = msg.status
+		return m, m.spinner.Tick
 
-	case topicSelectedMsg:
-		return m.handleTopicSelected(msg)
-
-	case exerciseSelectedMsg:
-		return m.handleExerciseSelected(msg)
-
-	case testResultMsg:
-		return m.handleTestResult(msg)
-
-	case hintResultMsg:
-		if !m.hintRequested {
-			return m, nil // user navigated away, ignore
-		}
-		m.hintResult = msg.hint
-		m.hintRequested = false
-		return m, nil
-
-	case hintErrorMsg:
-		if !m.hintRequested {
-			return m, nil // user navigated away, ignore
-		}
-		m.hintError = msg.err
-		m.hintRequested = false
-		return m, nil
+	case senseiResponseMsg:
+		return m.handleChatResponse(chatResponseMsg{content: msg.content, err: msg.err})
 
 	case chatResponseMsg:
 		return m.handleChatResponse(msg)
@@ -245,7 +139,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleChatSessionsLoaded(msg)
 
 	case spinner.TickMsg:
-		if m.state == stateTestRunning || (m.state == stateSenseiChat && m.chatLoading) {
+		if m.state == stateToolRunning || (m.state == stateSenseiChat && m.chatLoading) {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -254,6 +148,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	default:
 		return m, nil
+	}
+}
+
+// View renders the current TUI view based on state.
+func (m Model) View() string {
+	switch m.state {
+	case stateSenseiChat:
+		return m.viewSenseiChat()
+	case stateToolRunning:
+		return m.viewToolRunning()
+	case stateSessionSelector:
+		return m.viewSessionSelector()
+	default:
+		return "Cargando..."
 	}
 }
 
@@ -275,32 +183,5 @@ func (m *Model) saveCurrentChatSession() {
 
 	if pruned != "" {
 		m.chatPrunedMsg = pruned
-	}
-}
-
-// timeNow returns the current time. Exists for testability.
-var timeNow = func() time.Time { return time.Now() }
-
-// View renders the current TUI view based on state.
-func (m Model) View() string {
-	switch m.state {
-	case stateRoadmapView:
-		return m.viewRoadmap()
-	case stateTopicDetail:
-		return m.viewTopicDetail()
-	case stateExerciseView:
-		return m.viewExercise()
-	case stateTestRunning:
-		return m.viewTestRunning()
-	case stateTestResults:
-		return m.viewTestResults()
-	case stateHintDisplay:
-		return m.viewHintDisplay()
-	case stateSenseiChat:
-		return m.viewSenseiChat()
-	case stateSessionSelector:
-		return m.viewSessionSelector()
-	default:
-		return "Cargando..."
 	}
 }

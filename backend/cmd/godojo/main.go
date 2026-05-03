@@ -6,16 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"godojo/internal/adapters/chatstore"
 	"godojo/internal/adapters/gemini"
 	"godojo/internal/adapters/repository"
-	"godojo/internal/adapters/runner"
 	"godojo/internal/adapters/store"
 	"godojo/internal/adapters/tui"
+	"godojo/internal/adapters/workspace"
+	"godojo/internal/core"
 	"godojo/internal/core/services"
 )
 
@@ -31,7 +31,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "   Crea un archivo .env en la raíz del proyecto con: GEMINI_API_KEY=tu-key\n")
 	}
 
-	// 1. Set up progress directory
+	// 1. Set up data directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: no se pudo determinar el directorio home: %v\n", err)
@@ -44,25 +44,36 @@ func main() {
 	}
 	progressPath := filepath.Join(godojoDir, "progress.json")
 
-	// 2. Create adapters (real implementations)
+	// 2. Create adapters
 	progressStore := store.NewJSONProgressStore(progressPath)
-	testRunner := runner.NewGoTestRunner(30 * time.Second)
 	exerciseRepo := repository.NewEmbedExerciseRepo()
-	hintProvider := gemini.NewHintProvider()
-	chatStore := chatstore.NewChatStore(filepath.Join(homeDir, ".godojo", "sessions"))
 	chatProviderInstance := gemini.NewChatProvider()
+	chatStore := chatstore.NewChatStore(filepath.Join(homeDir, ".godojo", "sessions"))
 
-	// 3. Create services (inject adapters)
+	// 3. Create services
 	roadmapSvc := services.NewRoadmapService()
 	exerciseSvc := services.NewExerciseService(exerciseRepo)
 	progressSvc := services.NewProgressService(progressStore)
+	hintProvider := gemini.NewHintProvider()
 	hintSvc := services.NewHintService(hintProvider)
 
-	// 4. Create workspace path for exercises
-	workspacePath := filepath.Join(homeDir, "godojo", "exercises")
+	// 4. Create SenseiService (agentic AI loop)
+	toolRegistry := core.NewToolRegistry()
+	workspacePath := filepath.Join(homeDir, ".godojo", "workspace")
+	workspaceManager := workspace.NewWorkspaceManager(workspacePath)
+	senseiSvc := services.NewSenseiService(chatProviderInstance, toolRegistry, workspaceManager, roadmapSvc)
 
-	// 5. Create TUI model
-	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, exerciseRepo, workspacePath, chatStore, chatProviderInstance)
+	// 5. Create TUI model (simplified: only sensei + chat)
+	senseiSystemPrompt := `Sos un sensei de Go, un maestro experto en programación Go.
+Ayudás a estudiantes a aprender Go con paciencia, ejemplos claros y preguntas socráticas.
+Usá español rioplatense (voseo).`
+
+	model := tui.NewModel(senseiSvc, chatStore, senseiSystemPrompt)
+
+	// Suppress unused variable warnings for services still wired but unused in TUI
+	_ = exerciseSvc
+	_ = progressSvc
+	_ = hintSvc
 
 	// 6. Run Bubbletea
 	p := tea.NewProgram(model, tea.WithAltScreen())

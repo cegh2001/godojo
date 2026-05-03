@@ -11,27 +11,41 @@ import (
 )
 
 func TestModel_CtrlG_TransitionsToSenseiChat(t *testing.T) {
+	// Ctrl+G from sensei chat stays in sensei chat and creates session ID if blank
 	m := newModelTest()
-	m.state = stateRoadmapView
+	m.state = stateSenseiChat
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	updated := newM.(Model)
 
 	if updated.state != stateSenseiChat {
-		t.Errorf("after ctrl+g, state = %v, want %v", updated.state, stateSenseiChat)
-	}
-	if updated.previousView != stateRoadmapView {
-		t.Errorf("previousView = %v, want %v", updated.previousView, stateRoadmapView)
+		t.Errorf("after ctrl+g from sensei chat, state = %v, want %v", updated.state, stateSenseiChat)
 	}
 	if updated.chatSessionID == "" {
 		t.Error("chatSessionID should be auto-created when entering chat")
 	}
 }
 
-func TestModel_Esc_FromSenseiChat_GoesBack(t *testing.T) {
+func TestModel_CtrlG_FromSenseiChat_KeepsState(t *testing.T) {
 	m := newModelTest()
 	m.state = stateSenseiChat
-	m.previousView = stateRoadmapView
+	m.chatSessionID = "existing"
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	updated := newM.(Model)
+
+	if updated.state != stateSenseiChat {
+		t.Errorf("after ctrl+g from sensei chat, state = %v, want %v", updated.state, stateSenseiChat)
+	}
+	// Session ID should be preserved
+	if updated.chatSessionID != "existing" {
+		t.Errorf("chatSessionID changed from 'existing' to %q", updated.chatSessionID)
+	}
+}
+
+func TestModel_Esc_FromSenseiChat(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
 	m.chatSessionID = "test-id"
 	m.chatMessages = []chatstore.ChatMessage{
 		{Role: "user", Content: "Hola", Time: time.Now()},
@@ -40,8 +54,9 @@ func TestModel_Esc_FromSenseiChat_GoesBack(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated := newM.(Model)
 
-	if updated.state != stateRoadmapView {
-		t.Errorf("after Esc from chat, state = %v, want %v", updated.state, stateRoadmapView)
+	// Esc from sensei chat stays in sensei chat (no previous view to return to)
+	if updated.state != stateSenseiChat {
+		t.Errorf("after Esc from chat, state = %v, want %v", updated.state, stateSenseiChat)
 	}
 }
 
@@ -106,15 +121,13 @@ func TestModel_ChatSend_AddsUserMessage(t *testing.T) {
 	m.state = stateSenseiChat
 	m.chatSessionID = "test-session"
 	m.chatInput = "¿Qué es una goroutine?"
-	m.chatProvider = &mockChatProvider{
-		response: "Una goroutine es un hilo ligero manejado por el runtime de Go.",
-	}
+	// senseiSvc is nil → no cmd dispatched, but message still appended
 
-	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := newM.(Model)
 
-	if len(updated.chatMessages) != 1 {
-		t.Fatalf("expected 1 message after send, got %d", len(updated.chatMessages))
+	if len(updated.chatMessages) != 2 {
+		t.Fatalf("expected 2 messages after send (user + fallback), got %d", len(updated.chatMessages))
 	}
 	if updated.chatMessages[0].Role != "user" {
 		t.Errorf("message role = %q, want %q", updated.chatMessages[0].Role, "user")
@@ -122,15 +135,11 @@ func TestModel_ChatSend_AddsUserMessage(t *testing.T) {
 	if updated.chatMessages[0].Content != "¿Qué es una goroutine?" {
 		t.Errorf("message content = %q, want %q", updated.chatMessages[0].Content, "¿Qué es una goroutine?")
 	}
-	if !updated.chatLoading {
-		t.Error("chatLoading should be true after sending")
+	if updated.chatLoading {
+		t.Error("chatLoading should be false when senseiSvc is nil (no async dispatch)")
 	}
 	if updated.chatInput != "" {
 		t.Error("chatInput should be cleared after sending")
-	}
-
-	if cmd == nil {
-		t.Error("should dispatch a command to get sensei response")
 	}
 }
 
@@ -150,31 +159,12 @@ func TestModel_ChatSend_CreatesSessionID_WhenBlank(t *testing.T) {
 	m := newModelTest()
 	m.state = stateSenseiChat
 	m.chatInput = "¿Qué es una goroutine?"
-	m.chatProvider = &mockChatProvider{
-		response: "Una goroutine es un hilo ligero manejado por el runtime de Go.",
-	}
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := newM.(Model)
 
 	if updated.chatSessionID == "" {
 		t.Error("chatSessionID should be created when sending with an empty session")
-	}
-}
-
-func TestModel_ChatSend_WithProvider_DispatchesCommand(t *testing.T) {
-	m := newModelTest()
-	m.state = stateSenseiChat
-	m.chatSessionID = "test-id"
-	m.chatInput = "Hola sensei"
-	m.chatProvider = &mockChatProvider{
-		response: "¡Hola! ¿En qué te puedo ayudar?",
-	}
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	if cmd == nil {
-		t.Fatal("should dispatch a command when chatProvider is set")
 	}
 }
 
@@ -359,26 +349,26 @@ func TestModel_SessionSelector_BoundaryDown(t *testing.T) {
 	}
 }
 
-func TestModel_SessionSelector_CtrlL_InChatOnly(t *testing.T) {
+func TestModel_CtrlL_OnlyInSenseiChat(t *testing.T) {
 	m := newModelTest()
-	m.state = stateRoadmapView
+	m.state = stateSessionSelector
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
 	updated := newM.(Model)
 
-	if updated.state != stateRoadmapView {
+	if updated.state != stateSessionSelector {
 		t.Error("ctrl+l should not change state outside of sensei chat")
 	}
 }
 
 func TestModel_CtrlN_OnlyInChat(t *testing.T) {
 	m := newModelTest()
-	m.state = stateRoadmapView
+	m.state = stateSessionSelector
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	updated := newM.(Model)
 
-	if updated.state != stateRoadmapView {
+	if updated.state != stateSessionSelector {
 		t.Error("ctrl+n should not have effect outside of sensei chat")
 	}
 }

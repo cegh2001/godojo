@@ -2,6 +2,8 @@ package domain
 
 import "fmt"
 
+// Deprecated: Exercise will be removed in sensei-first v2.
+// Replaced by Gemma-generated .go files in ~/.godojo/workspace/.
 // Exercise represents a complete exercise with template, test, and solution code.
 type Exercise struct {
 	Slug         string

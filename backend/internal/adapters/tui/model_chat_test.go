@@ -1,108 +1,18 @@
 package tui
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"godojo/internal/adapters/chatstore"
-	"godojo/internal/core/domain"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/spinner"
 )
 
-// mockChatProvider implements chatProvider for testing.
-type mockChatProvider struct {
-	response    string
-	err         error
-	rateLimited bool
-}
-
-func (m *mockChatProvider) SendMessage(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage) (string, error) {
-	return m.response, m.err
-}
-
-func TestHandleTestResult_StoresLastTestOutput(t *testing.T) {
-	// GIVEN: Model in test running state
+func TestModel_ChatSessionsLoadedMsg_Integration(t *testing.T) {
 	m := newModelTest()
-	m.state = stateTestRunning
-
-	// WHEN: testResultMsg arrives with output
-	tr := &domain.TestResult{Passed: false, Output: "FAIL: expected 5, got 3", Duration: 100}
-	newM, _ := m.Update(testResultMsg{result: tr, err: nil})
-	updated := newM.(Model)
-
-	// THEN: lastTestOutput is stored
-	if updated.lastTestOutput != "FAIL: expected 5, got 3" {
-		t.Errorf("lastTestOutput = %q, want %q", updated.lastTestOutput, "FAIL: expected 5, got 3")
-	}
-}
-
-func TestHandleCtrlH_UsesLastTestOutput(t *testing.T) {
-	// GIVEN: Model with hintSvc, failed test, and stored lastTestOutput
-	hintSvc := &mockHintService{
-		hint: &domain.Hint{Content: "pista del output"},
-	}
-	m := newModelTest()
-	m.hintSvc = hintSvc
-	m.state = stateTestResults
-	m.testResult = &domain.TestResult{Passed: false, Output: "FAIL: assertion failed"}
-	m.currentExercise = &domain.Exercise{Slug: "ex-1"}
-	m.lastTestOutput = "FAIL: assertion failed"
-
-	// WHEN: ctrl+h is pressed, the dispatched command should use lastTestOutput
-	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
-	updated := newM.(Model)
-
-	if updated.state != stateHintDisplay {
-		t.Errorf("state after ctrl+h = %v, want %v", updated.state, stateHintDisplay)
-	}
-	if cmd == nil {
-		t.Fatal("ctrl+h should dispatch command when hint available")
-	}
-
-	// Execute the command and verify it produces a result (proves lastTestOutput was used)
-	msg := cmd()
-	_, ok := msg.(hintResultMsg)
-	if !ok {
-		t.Errorf("expected hintResultMsg from command, got %T", msg)
-	}
-}
-
-func TestNewModel_AcceptsTestRunnerAndWorkspacePath(t *testing.T) {
-	runner := &mockTestRunner{
-		result: &domain.TestResult{Passed: true},
-	}
-
-	// WHEN: NewModel is called with 9 params (including chat deps)
-	m := NewModel(
-		&stubRoadmapService{},
-		nil, // exerciseSvc
-		nil, // progressSvc
-		nil, // hintSvc
-		runner,
-		nil, // exerciseRepo
-		"/custom/workspace",
-		nil, // chatStore
-		nil, // chatProvider
-	)
-
-	// THEN: Fields are populated
-	if m.testRunner != runner {
-		t.Error("testRunner should be stored")
-	}
-	if m.workspacePath != "/custom/workspace" {
-		t.Errorf("workspacePath = %q, want %q", m.workspacePath, "/custom/workspace")
-	}
-	if m.state != stateRoadmapView {
-		t.Errorf("initial state = %v, want %v", m.state, stateRoadmapView)
-	}
-}
-
-func TestModel_ChatSessionsLoadedMsg(t *testing.T) {
-	m := newModelTest()
+	now := timeNow()
 	sessions := []chatstore.ChatSession{
-		{ID: "s1", Name: "Test", UpdatedAt: time.Now()},
+		{ID: "s1", Name: "Test", UpdatedAt: now},
 	}
 
 	newM, _ := m.Update(chatSessionsLoadedMsg{sessions: sessions, err: nil})
@@ -113,5 +23,112 @@ func TestModel_ChatSessionsLoadedMsg(t *testing.T) {
 	}
 	if updated.chatSessions[0].ID != "s1" {
 		t.Errorf("session ID = %q", updated.chatSessions[0].ID)
+	}
+}
+
+func TestModel_ChatResponseMsg_AppendsMessage(t *testing.T) {
+	m := newModelTest()
+	m.chatLoading = true
+
+	newM, _ := m.Update(chatResponseMsg{content: "Respuesta del sensei", err: nil})
+	updated := newM.(Model)
+
+	if updated.chatLoading {
+		t.Error("chatLoading should be false after response")
+	}
+	if len(updated.chatMessages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(updated.chatMessages))
+	}
+	if updated.chatMessages[0].Role != "sensei" {
+		t.Errorf("expected sensei role, got %q", updated.chatMessages[0].Role)
+	}
+	if updated.chatMessages[0].Content != "Respuesta del sensei" {
+		t.Errorf("content = %q, want %q", updated.chatMessages[0].Content, "Respuesta del sensei")
+	}
+}
+
+func TestModel_ChatResponseMsg_Error(t *testing.T) {
+	m := newModelTest()
+	m.chatLoading = true
+
+	newM, _ := m.Update(chatResponseMsg{content: "", err: assertAnError{}})
+	updated := newM.(Model)
+
+	if updated.chatLoading {
+		t.Error("chatLoading should be false after error response")
+	}
+	if len(updated.chatMessages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(updated.chatMessages))
+	}
+	if updated.chatMessages[0].Content == "" {
+		t.Error("error message should have content")
+	}
+}
+
+type assertAnError struct{}
+
+func (e assertAnError) Error() string { return "test error" }
+
+func TestModel_NewModel_StoresChatStore(t *testing.T) {
+	store := &chatstore.ChatStore{}
+	m := NewModel(nil, store, "")
+
+	if m.chatStore != store {
+		t.Error("chatStore should be stored in model")
+	}
+	if m.state != stateSenseiChat {
+		t.Errorf("initial state = %v, want %v", m.state, stateSenseiChat)
+	}
+}
+
+func TestModel_SpinnerTick_InToolRunning(t *testing.T) {
+	m := newModelTest()
+	m.state = stateToolRunning
+
+	spinnerTick := spinner.TickMsg{}
+	newM, cmd := m.Update(spinnerTick)
+	_ = newM
+	_ = cmd
+	// Just verify it doesn't panic
+}
+
+func TestModel_SpinnerTick_InChatLoading(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatLoading = true
+
+	spinnerTick := spinner.TickMsg{}
+	newM, cmd := m.Update(spinnerTick)
+	_ = newM
+	_ = cmd
+	// Just verify it doesn't panic
+}
+
+func TestModel_SpinnerTick_NotInRelevantState(t *testing.T) {
+	m := newModelTest()
+	// stateSenseiChat with chatLoading=false, or stateSessionSelector — no spinner update
+
+	spinnerTick := spinner.TickMsg{}
+	_, cmd := m.Update(spinnerTick)
+
+	// Spinner tick should be ignored (no command returned)
+	if cmd != nil {
+		t.Error("spinner tick should return nil when not in relevant state")
+	}
+}
+
+func TestModel_SenseiResponseMsg_Error(t *testing.T) {
+	m := newModelTest()
+	m.chatLoading = true
+	m.chatSessionID = "test-session"
+
+	newM, _ := m.Update(senseiResponseMsg{content: "", err: assertAnError{}})
+	updated := newM.(Model)
+
+	if updated.chatLoading {
+		t.Error("chatLoading should be false after error")
+	}
+	if len(updated.chatMessages) == 0 {
+		t.Fatal("expected at least 1 message")
 	}
 }

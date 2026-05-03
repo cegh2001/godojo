@@ -1,0 +1,129 @@
+package workspace
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// WorkspaceManager handles safe file operations within the workspace directory.
+type WorkspaceManager struct {
+	basePath string
+}
+
+// NewWorkspaceManager creates a WorkspaceManager rooted at basePath.
+func NewWorkspaceManager(basePath string) *WorkspaceManager {
+	return &WorkspaceManager{
+		basePath: basePath,
+	}
+}
+
+// CreateFile writes a file with the given content inside the workspace.
+// Only .go files are accepted. Path traversal via ".." is rejected.
+func (w *WorkspaceManager) CreateFile(filename string, content string) error {
+	safe, err := w.safePath(filename)
+	if err != nil {
+		return err
+	}
+
+	// Create parent directories
+	dir := filepath.Dir(safe)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("no se pudo crear el directorio %q: %w", dir, err)
+	}
+
+	if err := os.WriteFile(safe, []byte(content), 0644); err != nil {
+		return fmt.Errorf("no se pudo escribir el archivo %q: %w", filename, err)
+	}
+
+	return nil
+}
+
+// ReadFile reads the content of a file inside the workspace.
+func (w *WorkspaceManager) ReadFile(filename string) (string, error) {
+	safe, err := w.safePath(filename)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(safe)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("el archivo %q no existe", filename)
+		}
+		return "", fmt.Errorf("no se pudo leer el archivo %q: %w", filename, err)
+	}
+
+	return string(data), nil
+}
+
+// ListFiles returns a sorted list of all .go files (relative paths) in the workspace.
+// Creates the base directory if it does not exist.
+func (w *WorkspaceManager) ListFiles() ([]string, error) {
+	// Ensure the base directory exists
+	if err := os.MkdirAll(w.basePath, 0755); err != nil {
+		return nil, fmt.Errorf("no se pudo crear el workspace: %w", err)
+	}
+
+	entries, err := os.ReadDir(w.basePath)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo leer el workspace: %w", err)
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".go") {
+			files = append(files, entry.Name())
+		}
+	}
+
+	sort.Strings(files)
+
+	if files == nil {
+		files = []string{}
+	}
+
+	return files, nil
+}
+
+// WorkspacePath returns the absolute path to the workspace directory.
+func (w *WorkspaceManager) WorkspacePath() string {
+	return w.basePath
+}
+
+// safePath validates and resolves a filename within the workspace.
+// Returns the absolute safe path or an error.
+func (w *WorkspaceManager) safePath(filename string) (string, error) {
+	// Reject empty filename
+	if filename == "" {
+		return "", fmt.Errorf("el nombre del archivo no puede estar vacío")
+	}
+
+	// Reject path components
+	if strings.Contains(filename, "..") {
+		return "", fmt.Errorf("no se permite usar '..' en la ruta del archivo: %q", filename)
+	}
+
+	// Must end with .go
+	if !strings.HasSuffix(filename, ".go") {
+		return "", fmt.Errorf("solo se permiten archivos .go: %q", filename)
+	}
+
+	// Resolve to absolute path
+	abs, err := filepath.Abs(filepath.Join(w.basePath, filename))
+	if err != nil {
+		return "", fmt.Errorf("no se pudo resolver la ruta: %w", err)
+	}
+
+	// Verify it stays within basePath
+	if !strings.HasPrefix(abs, w.basePath+string(filepath.Separator)) && abs != w.basePath {
+		return "", fmt.Errorf("la ruta %q está fuera del workspace", filename)
+	}
+
+	return abs, nil
+}

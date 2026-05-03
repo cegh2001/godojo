@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"godojo/internal/core/domain"
 	"godojo/internal/core/ports"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // runTestsCmd returns a Bubbletea command that executes tests and sends back results.
@@ -43,21 +44,28 @@ func fetchHintCmd(hintSvc hintService, exercise *domain.Exercise, testOutput str
 			return hintErrorMsg{err: fmt.Errorf("pistas no disponibles en este momento (límite alcanzado)")}
 		}
 
-		// Wait for either hint or error
-		select {
-		case hint, ok := <-hintCh:
-			if ok && hint != nil {
-				return hintResultMsg{hint: hint}
+		timeout := time.NewTimer(30 * time.Second)
+		defer timeout.Stop()
+
+		// Wait for an actual hint or error value, ignoring closed channels with no payload.
+		for hintCh != nil || errCh != nil {
+			select {
+			case hint, ok := <-hintCh:
+				if ok && hint != nil {
+					return hintResultMsg{hint: hint}
+				}
+				hintCh = nil
+			case err, ok := <-errCh:
+				if ok && err != nil {
+					return hintErrorMsg{err: err}
+				}
+				errCh = nil
+			case <-timeout.C:
+				return hintErrorMsg{err: fmt.Errorf("timeout: el sensei no respondió a tiempo")}
 			}
-			return hintErrorMsg{err: fmt.Errorf("el sensei no respondió")}
-		case err, ok := <-errCh:
-			if ok && err != nil {
-				return hintErrorMsg{err: err}
-			}
-			return hintErrorMsg{err: fmt.Errorf("error desconocido al consultar al sensei")}
-		case <-time.After(30 * time.Second):
-			return hintErrorMsg{err: fmt.Errorf("timeout: el sensei no respondió a tiempo")}
 		}
+
+		return hintErrorMsg{err: fmt.Errorf("el sensei no respondió")}
 	}
 }
 

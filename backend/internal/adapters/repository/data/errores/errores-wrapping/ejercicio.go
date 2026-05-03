@@ -9,7 +9,7 @@ import (
 
 // LeerArchivoSeguro intenta leer un archivo y devuelve su contenido.
 // Si el archivo no se puede leer, envuelve el error con información adicional.
-// Pista: usá os.ReadFile para leer y fmt.Errorf("%w", err) para envolver errores.
+// Pista: usa os.ReadFile para leer y fmt.Errorf("%w", err) para envolver errores.
 // El verbo %w crea un error envuelto que errors.Is e errors.Unwrap pueden inspeccionar.
 func LeerArchivoSeguro(nombre string) (string, error) {
 	// TODO: Leer el archivo con os.ReadFile(nombre)
@@ -28,7 +28,7 @@ func EsArchivoNoEncontrado(err error) bool {
 
 // ProcesarArchivo lee un archivo y devuelve su contenido.
 // Si falla, envuelve el error con contexto adicional sobre qué operación falló.
-// Pista: llamá a LeerArchivoSeguro y envolvé el error si falla.
+// Pista: llama a LeerArchivoSeguro y envuelve el error si falla.
 func ProcesarArchivo(nombre string) (string, error) {
 	// TODO: Llamar a LeerArchivoSeguro(nombre)
 	// TODO: Si hay error, envolverlo con fmt.Errorf("error al procesar archivo: %w", err)

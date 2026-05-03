@@ -27,7 +27,7 @@ var (
 func (m Model) viewRoadmap() string {
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("GoDojo 🥋") + "\n")
-	sb.WriteString(helpStyle.Render("j/k navegar  enter seleccionar  q salir") + "\n\n")
+	sb.WriteString(helpStyle.Render("j/k navegar  enter seleccionar  ctrl+g sensei  q salir") + "\n\n")
 
 	for i, topic := range m.topics {
 		cursor := "  "
@@ -37,7 +37,7 @@ func (m Model) viewRoadmap() string {
 		sb.WriteString(fmt.Sprintf("%s%s\n", cursor, topic.Title))
 	}
 
-	sb.WriteString("\n" + helpStyle.Render("enter: ver tema  q: salir"))
+	sb.WriteString("\n" + helpStyle.Render("enter: ver tema  ctrl+g: sensei  q: salir"))
 	return sb.String()
 }
 
@@ -70,7 +70,7 @@ func (m Model) viewTopicDetail() string {
 		sb.WriteString(fmt.Sprintf("%s%s %s\n", cursor, ex.Title, diff))
 	}
 
-	sb.WriteString("\n" + helpStyle.Render("enter: ver ejercicio  esc: volver"))
+	sb.WriteString("\n" + helpStyle.Render("enter: ver ejercicio  ctrl+g: sensei  esc: volver"))
 	return sb.String()
 }
 
@@ -88,8 +88,8 @@ func (m Model) viewExercise() string {
 	}
 
 	sb.WriteString(helpStyle.Render(fmt.Sprintf("📁 Archivos en: %s\n\n", m.exercisePath())))
-	sb.WriteString(helpStyle.Render("ctrl+t: ejecutar tests  ctrl+h: pedir pista  esc: volver") + "\n\n")
-	sb.WriteString(helpStyle.Render("Abrí ejercicio.go en tu editor, completá los // TODO y volvé acá."))
+	sb.WriteString(helpStyle.Render("ctrl+t: ejecutar tests  ctrl+h: pedir pista  ctrl+g: sensei  esc: volver") + "\n\n")
+	sb.WriteString(helpStyle.Render("Abre ejercicio.go en tu editor, completa los // TODO y vuelve acá."))
 
 	return sb.String()
 }
@@ -139,7 +139,7 @@ func (m Model) viewHintDisplay() string {
 	if m.hintResult != nil {
 		sb.WriteString(m.hintResult.Content + "\n")
 	} else if m.hintError != nil {
-		sb.WriteString(failStyle.Render("El sensei no está disponible ahora. Intentá de nuevo en unos segundos.") + "\n")
+		sb.WriteString(failStyle.Render("El sensei no está disponible ahora. Intenta de nuevo en unos segundos.") + "\n")
 	} else {
 		sb.WriteString("Consultando al sensei...\n")
 	}

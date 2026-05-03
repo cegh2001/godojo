@@ -3,14 +3,14 @@
 package main
 
 // FiltrarPares devuelve un nuevo slice con solo los números pares del slice original.
-// Pista: recorré con for range y usá append para agregar los pares a un slice nuevo.
+// Pista: recorre con for range y usa append para agregar los pares a un slice nuevo.
 func FiltrarPares(nums []int) []int {
 	// TODO: Crear un slice vacío y agregar los números pares con append
 	return nil
 }
 
 // Concatenar devuelve un nuevo slice con todos los elementos de a seguidos de b.
-// Pista: usá append para combinar slices. Recordá usar ... para expandir un slice.
+// Pista: usa append para combinar slices. Recuerda usar ... para expandir un slice.
 func Concatenar(a, b []int) []int {
 	// TODO: Usar append(a, b...) para concatenar
 	return nil

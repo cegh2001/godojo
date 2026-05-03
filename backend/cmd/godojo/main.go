@@ -28,7 +28,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "🔑 Gemini API key cargada del .env\n")
 	} else {
 		fmt.Fprintf(os.Stderr, "⚠️  GEMINI_API_KEY no encontrada. Las pistas del sensei no estarán disponibles.\n")
-		fmt.Fprintf(os.Stderr, "   Creá un archivo .env en la raíz del proyecto con: GEMINI_API_KEY=tu-key\n")
+		fmt.Fprintf(os.Stderr, "   Crea un archivo .env en la raíz del proyecto con: GEMINI_API_KEY=tu-key\n")
 	}
 
 	// 1. Set up progress directory

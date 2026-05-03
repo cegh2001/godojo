@@ -245,7 +245,7 @@ func TestGetHint_HintContent_IsValidDomainObject(t *testing.T) {
 
 func TestGetHint_ChannelsClose(t *testing.T) {
 	mock := &mockClient{
-		response: "Pista: revisá los paréntesis.",
+		response: "Pista: revisa los paréntesis.",
 	}
 
 	provider := gemini.NewHintProviderWithClient("fake-key", mock)

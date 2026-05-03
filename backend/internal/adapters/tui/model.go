@@ -564,7 +564,7 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 		// No provider — show error message
 		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
 			Role:    "sensei",
-			Content: "Sensei no disponible — configurá GEMINI_API_KEY en .env",
+			Content: "Sensei no disponible — configura GEMINI_API_KEY en .env",
 			Time:    now,
 		})
 		m.chatLoading = false

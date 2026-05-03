@@ -97,7 +97,7 @@ func (r *GoTestRunner) ParseJSONOutput(raw string) (*domain.TestResult, error) {
 	// If the output doesn't contain JSON lines, it's likely a compile error
 	if !strings.Contains(raw, `"Action"`) {
 		return domain.NewTestResult(false,
-			fmt.Sprintf("🔴 El código no compila. Revisá los errores:\n\n%s", raw),
+			fmt.Sprintf("🔴 El código no compila. Revisa los errores:\n\n%s", raw),
 			time.Since(start))
 	}
 
@@ -157,7 +157,7 @@ func (r *GoTestRunner) ParseJSONOutput(raw string) (*domain.TestResult, error) {
 	// Detect compile errors: no test-level events AND output contains error markers
 	if totalTests == 0 && isCompileError(raw) {
 		return domain.NewTestResult(false,
-			fmt.Sprintf("🔴 El código no compila. Revisá los errores:\n\n%s", strings.Join(outputLines, "\n")),
+			fmt.Sprintf("🔴 El código no compila. Revisa los errores:\n\n%s", strings.Join(outputLines, "\n")),
 			time.Since(start))
 	}
 

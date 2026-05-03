@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"godojo/internal/adapters/chatstore"
@@ -28,17 +29,17 @@ func NewChatProvider() *ChatProvider {
 	}
 }
 
-// System prompt for the sensei — Spanish Rioplatense.
-const senseiSystemPrompt = `Sos un sensei experto en Go, parte de GoDojo. Ayudás a estudiantes a aprender Go desde cero.
-Conocés el roadmap de GoDojo (7 fases, 23 ejercicios). Podés explicar conceptos, dar ejemplos,
-sugerir ejercicios, y responder preguntas. Usá voseo rioplatense. Sé didáctico pero conciso.
-Si te preguntan algo que no sabés, decilo con honestidad.`
+// System prompt for the sensei — neutral Latin American Spanish.
+const senseiSystemPrompt = `Eres un sensei experto en Go, parte de GoDojo. Ayudas a estudiantes a aprender Go desde cero.
+Conoces el roadmap de GoDojo (7 fases, 23 ejercicios). Puedes explicar conceptos, dar ejemplos,
+sugerir ejercicios, y responder preguntas. Usa español neutro latinoamericano. Sé didáctico pero conciso.
+Si te preguntan algo que no sabes, dilo con honestidad.`
 
 // SendMessage sends a message to the Gemini API and returns the response.
 // It includes the full conversation history + system prompt.
 func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage) (string, error) {
 	if p.apiKey == "" {
-		return "", fmt.Errorf("Sensei no disponible — configurá GEMINI_API_KEY en .env")
+		return "", fmt.Errorf("Sensei no disponible — configura GEMINI_API_KEY en .env")
 	}
 
 	if systemPrompt == "" {
@@ -120,16 +121,14 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 	}
 
 	if resp.StatusCode != 200 {
-		return fmt.Sprintf("El sensei no está disponible ahora (error %d). Intentá de nuevo en unos segundos.", resp.StatusCode), nil
+		return fmt.Sprintf("El sensei no está disponible ahora (error %d). Intenta de nuevo en unos segundos.", resp.StatusCode), nil
 	}
 
 	// Parse the response
 	var result struct {
 		Candidates []struct {
 			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
+				Parts []map[string]interface{} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
 	}
@@ -138,9 +137,27 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		return "", fmt.Errorf("error al interpretar la respuesta: %w", err)
 	}
 
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "El sensei no tiene respuesta para eso. ¿Querés reformular la pregunta?", nil
+	if len(result.Candidates) == 0 {
+		return "El sensei no tiene respuesta para eso. ¿Quieres reformular la pregunta?", nil
 	}
 
-	return result.Candidates[0].Content.Parts[0].Text, nil
+	// Filter only text parts, ignore thought parts (chain-of-thought reasoning)
+	text := extractTextOnly(result.Candidates[0].Content.Parts)
+	if text == "" {
+		return "El sensei no tiene respuesta para eso. ¿Quieres reformular la pregunta?", nil
+	}
+
+	return text, nil
+}
+
+// extractTextOnly extracts only the "text" fields from Gemini API response parts,
+// ignoring "thought" parts (chain-of-thought reasoning that the model may include).
+func extractTextOnly(parts []map[string]interface{}) string {
+	var texts []string
+	for _, part := range parts {
+		if text, ok := part["text"].(string); ok && text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }

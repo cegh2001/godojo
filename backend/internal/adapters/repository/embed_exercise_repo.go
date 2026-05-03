@@ -198,7 +198,7 @@ func (r *EmbedExerciseRepo) GenerateFiles(ctx context.Context, exercise *domain.
 
 	if len(existingFiles) > 0 {
 		return fmt.Errorf(
-			"los siguientes archivos ya existen y no se van a sobrescribir: %s. Borralos manualmente si querés empezar de nuevo.",
+			"los siguientes archivos ya existen y no se van a sobrescribir: %s. Bórralos manualmente si quieres empezar de nuevo.",
 			strings.Join(existingFiles, ", "),
 		)
 	}

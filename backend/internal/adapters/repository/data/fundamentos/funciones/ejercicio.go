@@ -6,7 +6,7 @@ import "fmt"
 
 // Dividir divide dos números float64.
 // Si el divisor (b) es 0, debe devolver un error con mensaje descriptivo.
-// Pista: usá fmt.Errorf() para crear el error.
+// Pista: usa fmt.Errorf() para crear el error.
 func Dividir(a, b float64) (float64, error) {
 	// TODO: Validar que b no sea 0. Si es 0, devolver error.
 	// TODO: Si b no es 0, devolver a / b y nil.

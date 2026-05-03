@@ -18,6 +18,6 @@ func SumarArray(arr [5]int) int {
 // Contiene verifica si un valor existe en el array.
 // Retorna true si el valor está presente, false en caso contrario.
 func Contiene(arr [5]int, valor int) bool {
-	// TODO: Recorrer el array y devolver true si encontrás el valor
+	// TODO: Recorrer el array y devolver true si encuentras el valor
 	return false
 }

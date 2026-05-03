@@ -18,51 +18,48 @@ var (
 )
 
 // viewSenseiChat renders the main chat view.
-// Messages area: top 80% of the screen.
-// Input area: bottom 20%.
+// Clean header with session name, messages area, compact input, and help bar.
 func (m Model) viewSenseiChat() string {
-	// Calculate layout
-	messagesHeight := int(float64(m.height) * 0.8)
+	// Reserve bottom 3 lines for input + help bar
+	fixedFooter := 3
+	messagesHeight := m.height - fixedFooter
 	if messagesHeight < 3 {
 		messagesHeight = 3
-	}
-	inputHeight := m.height - messagesHeight
-	if inputHeight < 3 {
-		inputHeight = 3
-		messagesHeight = m.height - inputHeight
 	}
 
 	var sb strings.Builder
 
-	// Header
-	sb.WriteString(titleStyle.Render("🤖 Sensei Chat") + "\n")
+	// Header: session name + notification
+	sessionName := m.truncateChatSessionName()
+	sb.WriteString(titleStyle.Render("🤖 Sensei Chat — " + sessionName) + "\n")
 
 	// Notification bar (pruned session notification)
 	if m.chatPrunedMsg != "" {
 		sb.WriteString(pruneStyle.Render("🗑️ Sesión más antigua eliminada (máx 10): "+m.chatPrunedMsg) + "\n")
 	}
 
-	// Divider
-	sb.WriteString(strings.Repeat("─", m.width) + "\n")
-
-	// Messages area (scrollable — show most recent messages that fit)
-	messagesLines := m.renderChatMessages(messagesHeight - 2) // -2 for header + divider
+	// Messages area
+	messagesLines := m.renderChatMessages(messagesHeight - 2) // -2 for header lines
 	sb.WriteString(messagesLines)
 
-	// Fill remaining messages area with empty lines to push input to bottom
+	// Fill remaining space
 	usedLines := strings.Count(messagesLines, "\n")
 	for i := usedLines; i < messagesHeight-2; i++ {
 		sb.WriteString("\n")
 	}
 
-	// Divider between messages and input
-	sb.WriteString(strings.Repeat("─", m.width) + "\n")
+	// Separator line (thin)
+	sb.WriteString(helpStyle.Render(strings.Repeat("─", m.width)) + "\n")
 
-	// Input area
-	sb.WriteString(m.renderChatInput(inputHeight))
+	// Input area: just "> {input}"
+	inputDisplay := m.chatInput
+	if m.chatLoading {
+		inputDisplay = "..." // compact while waiting
+	}
+	sb.WriteString(inputStyle.Render("> " + inputDisplay))
 
-	// Help bar — always at the bottom
-	sb.WriteString("\n" + helpStyle.Render("Enviar: Enter | Nueva sesión: Ctrl+N | Sesiones: Ctrl+L | Volver: Esc"))
+	// Help bar
+	sb.WriteString("\n" + helpStyle.Render("Enviar: Enter | Nueva: Ctrl+N | Sesiones: Ctrl+L | Volver: Esc"))
 
 	return sb.String()
 }
@@ -71,21 +68,19 @@ func (m Model) viewSenseiChat() string {
 func (m Model) renderChatMessages(maxLines int) string {
 	var sb strings.Builder
 
+	// Welcome message when session is empty
 	if len(m.chatMessages) == 0 {
-		sb.WriteString(infoStyle.Render("Sensei: ¡Bienvenido al dojo! ¿En qué te puedo ayudar hoy?") + "\n")
+		sb.WriteString(senseiStyle.Render("🤖 Sensei: ") + "¡Hola! Soy tu sensei de Go. ¿En qué puedo ayudarte?" + "\n")
 		return sb.String()
 	}
 
 	// Calculate how many messages from the end we can show
-	// Start from the most recent and work backwards until we fill maxLines
 	var linesToRender []string
 	lineCount := 0
 
-	// If loading, add the spinner line
+	// If loading, show animated "pensando..." message
 	if m.chatLoading {
-		loadingPrefix := "Sensei: "
-		loadingMsg := m.spinner.View() + " Pensando..."
-		loadingLine := senseiStyle.Render(loadingPrefix) + loadingMsg
+		loadingLine := senseiStyle.Render("🤖 Sensei: ") + m.spinner.View() + " pensando..."
 		linesToRender = append([]string{loadingLine}, linesToRender...)
 		lineCount++
 	}
@@ -93,16 +88,16 @@ func (m Model) renderChatMessages(maxLines int) string {
 	// Render messages from newest to oldest until we fill the space
 	for i := len(m.chatMessages) - 1; i >= 0 && lineCount < maxLines; i-- {
 		msg := m.chatMessages[i]
-		prefix := "Sensei: "
+		prefix := "🤖 Sensei: "
 		style := senseiStyle
 		if msg.Role == "user" {
-			prefix = "Vos:     "
+			prefix = "Tú:       "
 			style = userStyle
 		}
 
 		// Truncate long messages for display
 		content := msg.Content
-		maxContentLen := m.width - 10 // leave room for prefix
+		maxContentLen := m.width - 15 // leave room for prefix
 		if maxContentLen < 20 {
 			maxContentLen = 20
 		}
@@ -118,26 +113,6 @@ func (m Model) renderChatMessages(maxLines int) string {
 	for _, line := range linesToRender {
 		sb.WriteString(line + "\n")
 	}
-
-	return sb.String()
-}
-
-// renderChatInput renders the input area at the bottom of the chat view.
-func (m Model) renderChatInput(availableLines int) string {
-	var sb strings.Builder
-
-	// Session info
-	if m.chatSessionID != "" {
-		sb.WriteString(infoStyle.Render(fmt.Sprintf("Sesión: %s\n", m.truncateChatSessionName())))
-	}
-
-	// Current input buffer
-	inputDisplay := m.chatInput
-	if m.chatLoading {
-		inputDisplay = "(esperando respuesta del sensei...)"
-	}
-
-	sb.WriteString(inputStyle.Render("> " + inputDisplay))
 
 	return sb.String()
 }

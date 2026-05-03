@@ -10,26 +10,9 @@ import (
 
 // EsperarConTimeout espera un tiempo determinado y devuelve "completado".
 // Si el tiempo es mayor a 2 segundos, devuelve un error por timeout.
-// Pista: usá select con time.After para implementar el timeout.
-//
-// Estructura del select:
-//   select {
-//   case <-time.After(tiempo):
-//       return "completado", nil
-//   case <-time.After(2 * time.Second):
-//       return "", fmt.Errorf("timeout")
-//   }
-func EsperarConTimeout(tiempo time.Duration) (string, error) {
-	// TODO: Usar select con dos casos de time.After
-	// TODO: Caso 1: esperar 'tiempo' y devolver "completado"
-	// TODO: Caso 2: timeout a los 2 segundos con error
-	return "", fmt.Errorf("no implementado")
-}
+// Pista: usa select con time.After para implementar el timeout.
 
-// TrabajarConContexto verifica si un contexto fue cancelado.
-// Si el contexto está activo, devuelve "trabajo completado".
-// Si el contexto fue cancelado (ctx.Done()), devuelve el error del contexto.
-// Pista: usá select con ctx.Done() para verificar cancelación.
+// Pista: usa select con ctx.Done() para verificar cancelación.
 //
 // Estructura:
 //   select {

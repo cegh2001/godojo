@@ -18,7 +18,7 @@ func TestViewSenseiChat_Empty_SenseiWelcome(t *testing.T) {
 	if !strings.Contains(view, "Sensei Chat") {
 		t.Error("chat view should show 'Sensei Chat' title")
 	}
-	if !strings.Contains(view, "Bienvenido al dojo") {
+	if !strings.Contains(view, "¡Hola! Soy tu sensei de Go") {
 		t.Error("empty chat should show welcome message")
 	}
 }
@@ -52,8 +52,8 @@ func TestViewSenseiChat_ShowsHelpBar(t *testing.T) {
 	if !strings.Contains(view, "Enviar: Enter") {
 		t.Error("chat view should show 'Enviar: Enter' help")
 	}
-	if !strings.Contains(view, "Nueva sesión: Ctrl+N") {
-		t.Error("chat view should show 'Nueva sesión: Ctrl+N' help")
+	if !strings.Contains(view, "Nueva: Ctrl+N") {
+		t.Error("chat view should show 'Nueva: Ctrl+N' help")
 	}
 	if !strings.Contains(view, "Sesiones: Ctrl+L") {
 		t.Error("chat view should show 'Sesiones: Ctrl+L' help")
@@ -74,11 +74,13 @@ func TestViewSenseiChat_ShowsLoadingIndicator(t *testing.T) {
 	}
 
 	view := m.View()
-	if !strings.Contains(view, "Pensando") {
-		t.Error("loading chat should show 'Pensando...' indicator")
+	if !strings.Contains(view, "pensando") {
+		t.Error("loading chat should show 'pensando...' indicator")
 	}
-	if !strings.Contains(view, "esperando respuesta") {
-		t.Error("loading chat should disable input with 'esperando respuesta'")
+	// Input area shows "..." while loading
+	view = m.View()
+	if !strings.Contains(view, "> ...") {
+		t.Error("loading chat should show '...' in input area")
 	}
 }
 

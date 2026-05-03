@@ -16,7 +16,7 @@ func Sumar(a, b int) int {
 }
 
 // EsPar retorna true si el número es par (el resto de dividir por 2 da 0).
-// Pista: usá el operador % (módulo) que devuelve el resto de una división.
+// Pista: usa el operador % (módulo) que devuelve el resto de una división.
 func EsPar(n int) bool {
 	// TODO: Verificar si n % 2 == 0
 	return false

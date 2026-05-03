@@ -27,7 +27,7 @@ func DividirSeguro(a, b float64) (float64, error) {
 
 // EsErrorDivisionCero verifica si un error es de tipo ErrorDivisionCero
 // usando errors.As, incluso si el error está envuelto (wrapped).
-// Pista: usá errors.As para verificar el tipo dentro de la cadena de errores.
+// Pista: usa errors.As para verificar el tipo dentro de la cadena de errores.
 func EsErrorDivisionCero(err error) bool {
 	// TODO: Declarar una variable de tipo *ErrorDivisionCero (puntero)
 	// TODO: Usar errors.As(err, &target) para verificar

@@ -69,7 +69,7 @@ func (p *HintProvider) GetHint(ctx context.Context, exercise *domain.Exercise, t
 		// Check if we have a client configured
 		if p.client == nil {
 			if p.apiKey == "" {
-				errCh <- fmt.Errorf("API key de Gemini no configurada. Configurá la variable de entorno GEMINI_API_KEY.")
+				errCh <- fmt.Errorf("API key de Gemini no configurada. Configura la variable de entorno GEMINI_API_KEY.")
 			} else {
 				errCh <- fmt.Errorf("cliente de Gemini no inicializado.")
 			}
@@ -83,7 +83,7 @@ func (p *HintProvider) GetHint(ctx context.Context, exercise *domain.Exercise, t
 		response, err := p.client.GenerateContent(ctx, prompt)
 		if err != nil {
 			if ctx.Err() != nil {
-				errCh <- fmt.Errorf("timeout: el sensei no respondió a tiempo. Probá de nuevo: %w", ctx.Err())
+				errCh <- fmt.Errorf("timeout: el sensei no respondió a tiempo. Prueba de nuevo: %w", ctx.Err())
 			} else {
 				errCh <- fmt.Errorf("error al consultar al sensei (API): %w", err)
 			}
@@ -119,7 +119,7 @@ func buildSocraticPrompt(exercise *domain.Exercise, testOutput string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Sos un sensei de Go. No des la respuesta. Guiá con preguntas socráticas.\n")
+	sb.WriteString("Eres un sensei de Go. No des la respuesta. Guía con preguntas socráticas.\n")
 	sb.WriteString("El estudiante está trabado en este ejercicio.\n\n")
 	sb.WriteString(fmt.Sprintf("📝 Ejercicio: %s\n", exercise.Title))
 	sb.WriteString(fmt.Sprintf("📂 Tema: %s\n\n", exercise.TopicSlug))
@@ -133,7 +133,7 @@ func buildSocraticPrompt(exercise *domain.Exercise, testOutput string) string {
 	sb.WriteString("\n--- Fin código ---\n\n")
 
 	sb.WriteString("Dame UNA sola pregunta o pista que lo haga pensar. No le des la solución.\n")
-	sb.WriteString("Usá voseo (español rioplatense).")
+	sb.WriteString("Usa español neutro latinoamericano.")
 
 	return sb.String()
 }
@@ -200,9 +200,7 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 	var result struct {
 		Candidates []struct {
 			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
+				Parts []map[string]interface{} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
 	}
@@ -211,9 +209,15 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 		return "", fmt.Errorf("error al interpretar la respuesta de Gemini: %w", err)
 	}
 
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+	if len(result.Candidates) == 0 {
 		return "", fmt.Errorf("Gemini no devolvió contenido")
 	}
 
-	return result.Candidates[0].Content.Parts[0].Text, nil
+	// Filter only text parts, ignore thought parts (chain-of-thought reasoning)
+	text := extractTextOnly(result.Candidates[0].Content.Parts)
+	if text == "" {
+		return "", fmt.Errorf("Gemini no devolvió contenido")
+	}
+
+	return text, nil
 }

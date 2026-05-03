@@ -10,7 +10,7 @@ import (
 // ContarHasta retorna un string con la secuencia de conteo de 1 hasta n.
 // Ejemplo: ContarHasta(3, "A") → "A: 1, A: 2, A: 3"
 // El parámetro nombre identifica al "contador" en el mensaje.
-// Pista: usá un bucle for y fmt.Sprintf para construir cada línea.
+// Pista: usa un bucle for y fmt.Sprintf para construir cada línea.
 func ContarHasta(n int, nombre string) string {
 	// TODO: Usar un bucle for i := 1; i <= n; i++
 	// TODO: Acumular los mensajes en una variable usando fmt.Sprintf

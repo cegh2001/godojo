@@ -4,15 +4,9 @@ package main
 
 // EnviarMensaje envía un mensaje a través de un channel de string.
 // La función se bloquea hasta que alguien reciba del otro lado.
-// Pista: usá el operador <- para enviar al channel: ch <- mensaje
-func EnviarMensaje(mensaje string, ch chan string) {
-	// TODO: Enviar mensaje al channel con ch <- mensaje
-}
+// Pista: usa el operador <- para enviar al channel: ch <- mensaje
 
-// RecibirYBailar recibe un mensaje de un channel de string y lo devuelve
-// formateado con baile (ej. "Mensaje recibido: HOLA").
-// La función se bloquea hasta que alguien envíe al channel.
-// Pista: usá el operador <- para recibir del channel: msg := <-ch
+// Pista: usa el operador <- para recibir del channel: msg := <-ch
 func RecibirYBailar(ch chan string) string {
 	// TODO: Recibir mensaje del channel con := <-ch
 	// TODO: Devolver el mensaje formateado: "Mensaje recibido: " + msg

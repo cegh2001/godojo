@@ -15,22 +15,11 @@ func FechaActual() string {
 }
 
 // HaceCuanto calcula cuánto tiempo pasó desde una fecha dada hasta ahora.
-// Pista: usá time.Since(fecha) que devuelve un time.Duration.
-func HaceCuanto(fecha time.Time) time.Duration {
-	// TODO: Devolver time.Since(fecha)
-	return 0
-}
+// Pista: usa time.Since(fecha) que devuelve un time.Duration.
 
-// EsFinde determina si una fecha cae en fin de semana (sábado o domingo).
-// Pista: usá fecha.Weekday() y compará con time.Saturday y time.Sunday.
-func EsFinde(fecha time.Time) bool {
-	// TODO: Obtener el día de la semana con fecha.Weekday()
-	// TODO: Comparar con time.Saturday y time.Sunday
-	return false
-}
+// Pista: usa fecha.Weekday() y compara con time.Saturday y time.Sunday.
 
-// AgregarDias suma una cantidad de días a una fecha y devuelve la nueva fecha.
-// Pista: usá fecha.AddDate(0, 0, dias). AddDate recibe (años, meses, días).
+// Pista: usa fecha.AddDate(0, 0, dias). AddDate recibe (años, meses, días).
 func AgregarDias(fecha time.Time, dias int) time.Time {
 	// TODO: Devolver fecha.AddDate(0, 0, dias)
 	return time.Time{}

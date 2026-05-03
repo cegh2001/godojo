@@ -17,8 +17,13 @@ type RoadmapService struct {
 func NewRoadmapService() *RoadmapService {
 	fase1 := buildFase1()
 	fase2 := buildFase2()
+	fase3 := buildFase3()
+	fase4 := buildFase4()
+	fase5 := buildFase5()
+	fase6 := buildFase6()
+	fase7 := buildFase7()
 
-	rm, err := domain.NewRoadmap([]*domain.Phase{fase1, fase2})
+	rm, err := domain.NewRoadmap([]*domain.Phase{fase1, fase2, fase3, fase4, fase5, fase6, fase7})
 	if err != nil {
 		// This is a programming error — the hardcoded roadmap should always be valid.
 		panic(fmt.Sprintf("hardcoded roadmap is invalid: %v", err))
@@ -28,6 +33,11 @@ func NewRoadmapService() *RoadmapService {
 	var allTopics []*domain.Topic
 	allTopics = append(allTopics, fase1.Topics...)
 	allTopics = append(allTopics, fase2.Topics...)
+	allTopics = append(allTopics, fase3.Topics...)
+	allTopics = append(allTopics, fase4.Topics...)
+	allTopics = append(allTopics, fase5.Topics...)
+	allTopics = append(allTopics, fase6.Topics...)
+	allTopics = append(allTopics, fase7.Topics...)
 
 	return &RoadmapService{
 		roadmap:   rm,
@@ -60,6 +70,63 @@ func buildFase2() *domain.Phase {
 	phase, err := domain.NewPhase("fase-2", "Estructuras de Datos", topics)
 	if err != nil {
 		panic(fmt.Sprintf("hardcoded fase-2 is invalid: %v", err))
+	}
+	return phase
+}
+
+func buildFase3() *domain.Phase {
+	topics := []*domain.Topic{
+		mustNewTopic("punteros", "Punteros", "Operadores & y *, punteros como parámetros, new(), pointer vs value receivers en structs."),
+	}
+	phase, err := domain.NewPhase("fase-3", "Punteros y Memoria", topics)
+	if err != nil {
+		panic(fmt.Sprintf("hardcoded fase-3 is invalid: %v", err))
+	}
+	return phase
+}
+
+func buildFase4() *domain.Phase {
+	topics := []*domain.Topic{
+		mustNewTopic("metodos", "Métodos", "Métodos con value y pointer receivers, cuándo usar cada uno."),
+		mustNewTopic("interfaces", "Interfaces", "Definición de interfaces, implementación implícita, polimorfismo, type assertions y type switch."),
+	}
+	phase, err := domain.NewPhase("fase-4", "Métodos e Interfaces", topics)
+	if err != nil {
+		panic(fmt.Sprintf("hardcoded fase-4 is invalid: %v", err))
+	}
+	return phase
+}
+
+func buildFase5() *domain.Phase {
+	topics := []*domain.Topic{
+		mustNewTopic("errores", "Manejo de Errores", "La interfaz error, errores personalizados, fmt.Errorf con %w, errors.Is y errors.As."),
+	}
+	phase, err := domain.NewPhase("fase-5", "Manejo de Errores", topics)
+	if err != nil {
+		panic(fmt.Sprintf("hardcoded fase-5 is invalid: %v", err))
+	}
+	return phase
+}
+
+func buildFase6() *domain.Phase {
+	topics := []*domain.Topic{
+		mustNewTopic("goroutines", "Goroutines", "Concurrencia con go, sync.WaitGroup, sync.Mutex, comunicación básica entre gorutinas."),
+		mustNewTopic("channels", "Channels", "Channels unbuffered y buffered, select, time.After, context.WithTimeout y cancelación."),
+	}
+	phase, err := domain.NewPhase("fase-6", "Concurrencia", topics)
+	if err != nil {
+		panic(fmt.Sprintf("hardcoded fase-6 is invalid: %v", err))
+	}
+	return phase
+}
+
+func buildFase7() *domain.Phase {
+	topics := []*domain.Topic{
+		mustNewTopic("stdlib", "Standard Library", "os (archivos), encoding/json, time (formateo y duraciones)."),
+	}
+	phase, err := domain.NewPhase("fase-7", "Standard Library", topics)
+	if err != nil {
+		panic(fmt.Sprintf("hardcoded fase-7 is invalid: %v", err))
 	}
 	return phase
 }

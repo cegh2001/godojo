@@ -38,6 +38,24 @@ var exerciseManifest = []exerciseMeta{
 	{slug: "slices", title: "Slices y Operaciones", topicSlug: "slices", difficulty: domain.DifficultyMedium, dir: "data/estructuras/slices"},
 	{slug: "maps", title: "Maps en Go", topicSlug: "maps", difficulty: domain.DifficultyMedium, dir: "data/estructuras/maps"},
 	{slug: "structs", title: "Structs y Métodos", topicSlug: "structs", difficulty: domain.DifficultyMedium, dir: "data/estructuras/structs"},
+	// Fase 3: Punteros y Memoria
+	{slug: "punteros", title: "Punteros Básicos", topicSlug: "punteros", difficulty: domain.DifficultyMedium, dir: "data/punteros/punteros"},
+	{slug: "punteros-structs", title: "Punteros con Structs", topicSlug: "punteros", difficulty: domain.DifficultyMedium, dir: "data/punteros/punteros-structs"},
+	// Fase 4: Métodos e Interfaces
+	{slug: "metodos", title: "Métodos en Go", topicSlug: "metodos", difficulty: domain.DifficultyMedium, dir: "data/metodos/metodos"},
+	{slug: "interfaces", title: "Interfaces", topicSlug: "interfaces", difficulty: domain.DifficultyMedium, dir: "data/interfaces/interfaces"},
+	{slug: "type-assertions", title: "Type Assertions y Type Switch", topicSlug: "interfaces", difficulty: domain.DifficultyMedium, dir: "data/interfaces/type-assertions"},
+	// Fase 5: Manejo de Errores
+	{slug: "errores-personalizados", title: "Errores Personalizados", topicSlug: "errores", difficulty: domain.DifficultyMedium, dir: "data/errores/errores-personalizados"},
+	{slug: "errores-wrapping", title: "Wrapping de Errores", topicSlug: "errores", difficulty: domain.DifficultyMedium, dir: "data/errores/errores-wrapping"},
+	// Fase 6: Concurrencia
+	{slug: "goroutines", title: "Goroutines Básicas", topicSlug: "goroutines", difficulty: domain.DifficultyHard, dir: "data/gorutinas/goroutines"},
+	{slug: "channels", title: "Channels", topicSlug: "channels", difficulty: domain.DifficultyHard, dir: "data/canales/channels"},
+	{slug: "select-context", title: "Select y Context", topicSlug: "channels", difficulty: domain.DifficultyHard, dir: "data/canales/select-context"},
+	// Fase 7: Standard Library
+	{slug: "archivos", title: "Manipulación de Archivos", topicSlug: "stdlib", difficulty: domain.DifficultyMedium, dir: "data/stdlib/archivos"},
+	{slug: "json", title: "JSON en Go", topicSlug: "stdlib", difficulty: domain.DifficultyMedium, dir: "data/stdlib/json"},
+	{slug: "tiempo", title: "Time y Formateo", topicSlug: "stdlib", difficulty: domain.DifficultyMedium, dir: "data/stdlib/tiempo"},
 }
 
 // extraFiles defines additional files to write alongside the main ejercicio.go

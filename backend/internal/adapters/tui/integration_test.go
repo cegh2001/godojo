@@ -287,8 +287,8 @@ func TestIntegration_HintDegradation(t *testing.T) {
 	}
 }
 
-// TestIntegration_Roadmap_HasTwoPhases verifies roadmap structure.
-func TestIntegration_Roadmap_HasTwoPhases(t *testing.T) {
+// TestIntegration_Roadmap_HasSevenPhases verifies roadmap structure.
+func TestIntegration_Roadmap_HasSevenPhases(t *testing.T) {
 	roadmapSvc, _, _, _ := setupIntegrationServices(t)
 
 	rm, err := roadmapSvc.GetRoadmap()
@@ -296,8 +296,8 @@ func TestIntegration_Roadmap_HasTwoPhases(t *testing.T) {
 		t.Fatalf("GetRoadmap() error: %v", err)
 	}
 
-	if len(rm.Phases) != 2 {
-		t.Errorf("expected 2 phases, got %d", len(rm.Phases))
+	if len(rm.Phases) != 7 {
+		t.Errorf("expected 7 phases, got %d", len(rm.Phases))
 	}
 
 	fase1 := rm.Phases[0]
@@ -314,6 +314,22 @@ func TestIntegration_Roadmap_HasTwoPhases(t *testing.T) {
 	}
 	if len(fase2.Topics) != 4 {
 		t.Errorf("fase 2 topics = %d, want 4", len(fase2.Topics))
+	}
+
+	fase3 := rm.Phases[2]
+	if fase3.ID != "fase-3" {
+		t.Errorf("phase 3 id = %q, want 'fase-3'", fase3.ID)
+	}
+	if len(fase3.Topics) != 1 {
+		t.Errorf("fase 3 topics = %d, want 1", len(fase3.Topics))
+	}
+
+	fase7 := rm.Phases[6]
+	if fase7.ID != "fase-7" {
+		t.Errorf("phase 7 id = %q, want 'fase-7'", fase7.ID)
+	}
+	if len(fase7.Topics) != 1 {
+		t.Errorf("fase 7 topics = %d, want 1", len(fase7.Topics))
 	}
 
 	// No duplicate slugs

@@ -31,10 +31,14 @@ func NewChatProvider() *ChatProvider {
 }
 
 // System prompt for the sensei — neutral Latin American Spanish.
-const senseiSystemPrompt = `Eres un sensei experto en Go, parte de GoDojo. Ayudas a estudiantes a aprender Go desde cero.
-Conoces el roadmap de GoDojo (7 fases, 23 ejercicios). Puedes explicar conceptos, dar ejemplos,
-sugerir ejercicios, y responder preguntas. Usa español neutro latinoamericano. Sé didáctico pero conciso.
-Si te preguntan algo que no sabes, dilo con honestidad.`
+const senseiSystemPrompt = `Eres un sensei experto en el lenguaje de programación Go (Golang), parte de GoDojo. 
+Ayudas a estudiantes a aprender a programar en Go desde cero.
+Conoces el roadmap de GoDojo (7 fases, 23 ejercicios): Fundamentos, Estructuras de Datos, Punteros, 
+Métodos e Interfaces, Manejo de Errores, Concurrencia, y Standard Library.
+Puedes explicar conceptos de programación, dar ejemplos de código, sugerir ejercicios, y responder preguntas. 
+Usa español neutro latinoamericano. Sé didáctico pero conciso.
+Si te preguntan algo que no sabes, dilo con honestidad.
+NO eres un sensei del juego de mesa Go (weiqi/baduk). Eres un sensei de Golang.`
 
 // SendMessage sends a message to the Gemini API and returns the response.
 // Uses system_instruction for the sensei persona and contents for conversation.
@@ -80,7 +84,7 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 	defer cancel()
 
 	// Build the request with system_instruction as separate field
-	model := "gemini-2.5-flash"
+	model := "gemma-4-31b-it"
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		model, p.apiKey,
@@ -156,11 +160,16 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 	return text, nil
 }
 
-// extractTextOnly extracts only the "text" fields from Gemini API response parts,
-// ignoring "thought" parts (chain-of-thought reasoning that the model may include).
+// extractTextOnly extracts only the actual response text from Gemini API response parts,
+// skipping "thought" parts (chain-of-thought reasoning that gemma-4 models include).
+// Thought parts have both "text" and "thought":true keys — we skip those.
 func extractTextOnly(parts []map[string]interface{}) string {
 	var texts []string
 	for _, part := range parts {
+		// Skip chain-of-thought reasoning parts
+		if isThought, ok := part["thought"].(bool); ok && isThought {
+			continue
+		}
 		if text, ok := part["text"].(string); ok && text != "" {
 			texts = append(texts, text)
 		}

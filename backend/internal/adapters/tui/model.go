@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
+	"godojo/internal/adapters/chatstore"
 	"godojo/internal/core/domain"
 	"godojo/internal/core/ports"
 )
@@ -15,12 +17,14 @@ import (
 type tuiState int
 
 const (
-	stateRoadmapView  tuiState = iota // browsing phases/topics
-	stateTopicDetail                  // viewing topic info + exercises
-	stateExerciseView                 // viewing exercise description
-	stateTestRunning                  // spinner while tests run
-	stateTestResults                  // showing test output
-	stateHintDisplay                  // showing Socratic hint
+	stateRoadmapView    tuiState = iota // browsing phases/topics
+	stateTopicDetail                    // viewing topic info + exercises
+	stateExerciseView                   // viewing exercise description
+	stateTestRunning                    // spinner while tests run
+	stateTestResults                    // showing test output
+	stateHintDisplay                    // showing Socratic hint
+	stateSenseiChat                     // chat with AI sensei
+	stateSessionSelector                // session list overlay
 )
 
 // roadmapService defines the interface for roadmap operations.
@@ -49,6 +53,11 @@ type progressService interface {
 type hintService interface {
 	RequestHint(exercise *domain.Exercise, testOutput string) (<-chan *domain.Hint, <-chan error)
 	IsAvailable() bool
+}
+
+// chatProvider defines the interface for chat AI operations.
+type chatProvider interface {
+	SendMessage(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage) (string, error)
 }
 
 // Model is the main Bubbletea model for the GoDojo TUI.
@@ -89,6 +98,16 @@ type Model struct {
 	exerciseRepo   ports.ExerciseRepository
 	workspacePath  string
 	lastTestOutput string
+
+	// Sensei chat
+	chatProvider   chatProvider
+	chatStore      *chatstore.ChatStore
+	chatSessions   []chatstore.ChatSession
+	chatMessages   []chatstore.ChatMessage
+	chatInput      string
+	chatLoading    bool
+	chatSessionID  string
+	chatPrunedMsg  string // notification about pruned session
 }
 
 // roadmapLoadedMsg is sent when the roadmap is loaded from RoadmapService.
@@ -122,7 +141,19 @@ type hintErrorMsg struct {
 	err error
 }
 
-// NewModel creates a new TUI Model with the given services, test runner, repo, and workspace.
+// chatResponseMsg is sent when the sensei responds.
+type chatResponseMsg struct {
+	content string
+	err     error
+}
+
+// chatSessionsLoadedMsg is sent when the session list is loaded from the store.
+type chatSessionsLoadedMsg struct {
+	sessions []chatstore.ChatSession
+	err      error
+}
+
+// NewModel creates a new TUI Model with the given services, test runner, repo, workspace, and chat dependencies.
 func NewModel(
 	roadmapSvc roadmapService,
 	exerciseSvc exerciseService,
@@ -131,6 +162,8 @@ func NewModel(
 	testRunner ports.TestRunner,
 	exerciseRepo ports.ExerciseRepository,
 	workspacePath string,
+	chatStore *chatstore.ChatStore,
+	chatProv chatProvider,
 ) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -146,6 +179,8 @@ func NewModel(
 		exerciseRepo:  exerciseRepo,
 		workspacePath: workspacePath,
 		spinner:       sp,
+		chatStore:     chatStore,
+		chatProvider:  chatProv,
 	}
 }
 
@@ -164,6 +199,10 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// When in sensei chat or session selector, handle text input first
+		if m.state == stateSenseiChat && (msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace) {
+			return m.handleChatTextInput(msg)
+		}
 		return m.handleKeyMsg(msg)
 
 	case tea.WindowSizeMsg:
@@ -199,8 +238,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hintRequested = false
 		return m, nil
 
+	case chatResponseMsg:
+		return m.handleChatResponse(msg)
+
+	case chatSessionsLoadedMsg:
+		return m.handleChatSessionsLoaded(msg)
+
 	case spinner.TickMsg:
-		if m.state == stateTestRunning {
+		if m.state == stateTestRunning || (m.state == stateSenseiChat && m.chatLoading) {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -213,6 +258,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// When in session selector, handle differently
+	if m.state == stateSessionSelector {
+		return m.handleSessionSelectorKey(msg)
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
@@ -234,6 +284,21 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "ctrl+h":
 		return m.handleCtrlH()
+
+	case "ctrl+g":
+		return m.handleCtrlG()
+
+	case "ctrl+n":
+		if m.state == stateSenseiChat {
+			return m.handleChatNew()
+		}
+		return m, nil
+
+	case "ctrl+l":
+		if m.state == stateSenseiChat {
+			return m.handleChatList()
+		}
+		return m, nil
 
 	default:
 		return m, nil
@@ -258,6 +323,19 @@ func (m Model) handleEsc() (tea.Model, tea.Cmd) {
 		m.hintRequested = false
 		m.state = m.previousView
 		m.hintError = nil
+		return m, nil
+	case stateSenseiChat:
+		// Save current session before leaving
+		m.saveCurrentChatSession()
+		m.chatPrunedMsg = "" // clear notification
+		m.state = m.previousView
+		if m.state == stateSenseiChat {
+			m.state = stateRoadmapView // fallback
+		}
+		return m, nil
+	case stateSessionSelector:
+		m.state = stateSenseiChat
+		m.cursor = 0
 		return m, nil
 	default:
 		return m, nil
@@ -313,6 +391,10 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			return m, nil
 		}
+	case stateSenseiChat:
+		return m.handleChatSend()
+	case stateSessionSelector:
+		return m.handleSessionSelect()
 	}
 	return m, nil
 }
@@ -338,6 +420,8 @@ func (m Model) getCursorMax() int {
 		return len(m.topics)
 	case stateTopicDetail:
 		return len(m.exercises)
+	case stateSessionSelector:
+		return len(m.chatSessions)
 	default:
 		return 0
 	}
@@ -414,6 +498,228 @@ func (m Model) handleTestResult(msg testResultMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// --- Sensei Chat Handlers ---
+
+// handleCtrlG transitions to sensei chat from any main view.
+func (m Model) handleCtrlG() (tea.Model, tea.Cmd) {
+	// Save previous view for back navigation
+	if m.state != stateSenseiChat && m.state != stateSessionSelector {
+		m.previousView = m.state
+	}
+
+	m.state = stateSenseiChat
+	m.chatPrunedMsg = "" // clear old notification
+
+	// If no active session, auto-create one
+	if m.chatSessionID == "" {
+		m.chatSessionID = chatstore.NewSessionID()
+		m.chatMessages = nil
+	}
+
+	return m, nil
+}
+
+// handleChatTextInput accumulates typed characters into the input buffer.
+func (m Model) handleChatTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.chatLoading {
+		return m, nil // ignore input while loading
+	}
+
+	// Handle backspace
+	if msg.Type == tea.KeyBackspace || (len(msg.Runes) == 1 && msg.Runes[0] == 127) {
+		if len(m.chatInput) > 0 {
+			runes := []rune(m.chatInput)
+			m.chatInput = string(runes[:len(runes)-1])
+		}
+		return m, nil
+	}
+
+	// Accumulate runes
+	for _, r := range msg.Runes {
+		m.chatInput += string(r)
+	}
+	return m, nil
+}
+
+// handleChatSend sends the current input as a user message to the sensei.
+func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
+	input := strings.TrimSpace(m.chatInput)
+	if input == "" || m.chatLoading {
+		return m, nil
+	}
+
+	// Add user message
+	now := timeNow()
+	m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
+		Role:    "user",
+		Content: input,
+		Time:    now,
+	})
+
+	m.chatInput = ""
+	m.chatLoading = true
+
+	// Dispatch async API call
+	if m.chatProvider == nil {
+		// No provider — show error message
+		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
+			Role:    "sensei",
+			Content: "Sensei no disponible — configurá GEMINI_API_KEY en .env",
+			Time:    now,
+		})
+		m.chatLoading = false
+		m.saveCurrentChatSession()
+		return m, nil
+	}
+
+	cmd := m.sendChatCmd()
+	return m, cmd
+}
+
+// sendChatCmd creates a command that calls SendMessage asynchronously.
+func (m Model) sendChatCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		response, err := m.chatProvider.SendMessage(ctx, "", m.chatMessages)
+
+		// If err is non-nil, the response string may also contain a user-friendly message
+		if err != nil {
+			if response != "" {
+				return chatResponseMsg{content: response, err: err}
+			}
+			return chatResponseMsg{content: err.Error(), err: err}
+		}
+
+		return chatResponseMsg{content: response, err: nil}
+	}
+}
+
+// handleChatResponse processes the sensei's response.
+func (m Model) handleChatResponse(msg chatResponseMsg) (tea.Model, tea.Cmd) {
+	if msg.content == "" && msg.err != nil {
+		msg.content = fmt.Sprintf("Error: %v", msg.err)
+	}
+
+	m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
+		Role:    "sensei",
+		Content: msg.content,
+		Time:    timeNow(),
+	})
+	m.chatLoading = false
+
+	// Auto-save session
+	m.saveCurrentChatSession()
+
+	return m, nil
+}
+
+// handleChatNew saves the current session and starts a new one.
+func (m Model) handleChatNew() (tea.Model, tea.Cmd) {
+	m.saveCurrentChatSession()
+	m.chatSessionID = chatstore.NewSessionID()
+	m.chatMessages = nil
+	m.chatInput = ""
+	m.chatLoading = false
+	m.chatPrunedMsg = ""
+	return m, nil
+}
+
+// handleChatList loads the session list and transitions to the selector.
+func (m Model) handleChatList() (tea.Model, tea.Cmd) {
+	if m.chatStore == nil {
+		return m, nil
+	}
+
+	// Load sessions from the store synchronously for simplicity
+	sessions, err := m.chatStore.ListSessions()
+	if err != nil {
+		// Silently fail — show empty list
+		m.chatSessions = nil
+	} else {
+		m.chatSessions = sessions
+	}
+
+	m.state = stateSessionSelector
+	m.cursor = 0
+	return m, nil
+}
+
+// handleSessionSelectorKey handles key presses in the session selector overlay.
+func (m Model) handleSessionSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		return m.handleEsc()
+	case "enter":
+		return m.handleSessionSelect()
+	case "up", "k":
+		return m.handleCursorUp()
+	case "down", "j":
+		return m.handleCursorDown()
+	}
+	return m, nil
+}
+
+// handleSessionSelect loads the selected session.
+func (m Model) handleSessionSelect() (tea.Model, tea.Cmd) {
+	if m.cursor < 0 || m.cursor >= len(m.chatSessions) {
+		return m, nil
+	}
+
+	if m.chatStore == nil {
+		return m, nil
+	}
+
+	selected := m.chatSessions[m.cursor]
+	session, err := m.chatStore.LoadSession(selected.ID)
+	if err != nil {
+		return m, nil
+	}
+
+	m.chatSessionID = session.ID
+	m.chatMessages = session.Messages
+	m.chatInput = ""
+	m.chatLoading = false
+	m.chatPrunedMsg = ""
+	m.state = stateSenseiChat
+	m.cursor = 0
+
+	return m, nil
+}
+
+// handleChatSessionsLoaded processes the session list after loading.
+func (m Model) handleChatSessionsLoaded(msg chatSessionsLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.chatSessions = nil
+	} else {
+		m.chatSessions = msg.sessions
+	}
+	return m, nil
+}
+
+// saveCurrentChatSession persists the current session to disk.
+func (m *Model) saveCurrentChatSession() {
+	if m.chatStore == nil || m.chatSessionID == "" || len(m.chatMessages) == 0 {
+		return
+	}
+
+	session := &chatstore.ChatSession{
+		ID:       m.chatSessionID,
+		Messages: m.chatMessages,
+	}
+
+	pruned, err := m.chatStore.SaveSession(session)
+	if err != nil {
+		return // silently fail — don't block UI
+	}
+
+	if pruned != "" {
+		m.chatPrunedMsg = pruned
+	}
+}
+
+// timeNow returns the current time. Exists for testability.
+var timeNow = func() time.Time { return time.Now() }
+
 // View renders the current TUI view based on state.
 func (m Model) View() string {
 	switch m.state {
@@ -429,6 +735,10 @@ func (m Model) View() string {
 		return m.viewTestResults()
 	case stateHintDisplay:
 		return m.viewHintDisplay()
+	case stateSenseiChat:
+		return m.viewSenseiChat()
+	case stateSessionSelector:
+		return m.viewSessionSelector()
 	default:
 		return "Cargando..."
 	}

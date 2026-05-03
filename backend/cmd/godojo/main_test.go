@@ -47,7 +47,7 @@ func TestWiring_NoPanic(t *testing.T) {
 	}
 
 	// 3. Create TUI model — should not panic
-	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, nil, t.TempDir())
+	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, nil, t.TempDir(), nil, nil)
 
 	// 4. Verify model is initialized
 	if model.Init() == nil {
@@ -87,7 +87,7 @@ func TestWiring_MissingGeminiAPIKey_DoesNotCrash(t *testing.T) {
 	exerciseSvc := services.NewExerciseService(exerciseRepo)
 	progressSvc := services.NewProgressService(progressStore)
 
-	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, nil, t.TempDir())
+	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, nil, t.TempDir(), nil, nil)
 
 	// Init should still work (hint degradation is expected)
 	cmd := model.Init()

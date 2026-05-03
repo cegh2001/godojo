@@ -73,7 +73,7 @@ func updateModelCmd(m Model, msg tea.Msg) (Model, tea.Cmd) {
 func TestIntegration_RoadmapLoadsAndRenders(t *testing.T) {
 	roadmapSvc, exerciseSvc, progressSvc, hintSvc := setupIntegrationServices(t)
 
-	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "")
+	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "", nil, nil)
 
 	// Verify initial state
 	if model.state != stateRoadmapView {
@@ -112,7 +112,7 @@ func TestIntegration_RoadmapLoadsAndRenders(t *testing.T) {
 func TestIntegration_TopicDetail_NavigateToTopic(t *testing.T) {
 	roadmapSvc, exerciseSvc, progressSvc, hintSvc := setupIntegrationServices(t)
 
-	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "")
+	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "", nil, nil)
 
 	// Load roadmap
 	initCmd := model.Init()
@@ -132,7 +132,7 @@ func TestIntegration_TopicDetail_NavigateToTopic(t *testing.T) {
 func TestIntegration_FullNavigationCycle(t *testing.T) {
 	roadmapSvc, exerciseSvc, progressSvc, hintSvc := setupIntegrationServices(t)
 
-	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "")
+	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "", nil, nil)
 
 	// Load roadmap
 	initCmd := model.Init()
@@ -192,7 +192,7 @@ func TestIntegration_MissingAPIKey_DoesNotCrash(t *testing.T) {
 
 	roadmapSvc, exerciseSvc, progressSvc, hintSvc := setupIntegrationServices(t)
 
-	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "")
+	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "", nil, nil)
 	if model.Init() == nil {
 		t.Fatal("Init() should return non-nil cmd even without API key")
 	}
@@ -375,7 +375,7 @@ func TestIntegration_AllTopicsHaveExercises(t *testing.T) {
 func TestIntegration_QuitCommands(t *testing.T) {
 	roadmapSvc, exerciseSvc, progressSvc, hintSvc := setupIntegrationServices(t)
 
-	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "")
+	model := NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, nil, nil, "", nil, nil)
 
 	// Load roadmap first
 	initCmd := model.Init()

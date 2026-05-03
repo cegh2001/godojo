@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"godojo/internal/adapters/chatstore"
 	"godojo/internal/adapters/gemini"
 	"godojo/internal/adapters/repository"
 	"godojo/internal/adapters/runner"
@@ -48,6 +49,8 @@ func main() {
 	testRunner := runner.NewGoTestRunner(30 * time.Second)
 	exerciseRepo := repository.NewEmbedExerciseRepo()
 	hintProvider := gemini.NewHintProvider()
+	chatStore := chatstore.NewChatStore(filepath.Join(homeDir, ".godojo", "sessions"))
+	chatProviderInstance := gemini.NewChatProvider()
 
 	// 3. Create services (inject adapters)
 	roadmapSvc := services.NewRoadmapService()
@@ -59,7 +62,7 @@ func main() {
 	workspacePath := filepath.Join(homeDir, "godojo", "exercises")
 
 	// 5. Create TUI model
-	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, exerciseRepo, workspacePath)
+	model := tui.NewModel(roadmapSvc, exerciseSvc, progressSvc, hintSvc, testRunner, exerciseRepo, workspacePath, chatStore, chatProviderInstance)
 
 	// 6. Run Bubbletea
 	p := tea.NewProgram(model, tea.WithAltScreen())

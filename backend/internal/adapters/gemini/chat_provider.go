@@ -22,6 +22,13 @@ type ChatProvider struct {
 	timeout time.Duration
 }
 
+const (
+	maxChatContextMessages     = 6
+	maxChatMessagePromptRunes  = 360
+	maxChatMessageSummaryRunes = 140
+	chatMaxOutputTokens        = 1200
+)
+
 // NewChatProvider creates a ChatProvider using the GEMINI_API_KEY environment variable.
 func NewChatProvider() *ChatProvider {
 	return &ChatProvider{
@@ -37,6 +44,8 @@ Conoces el roadmap de GoDojo (7 fases, 23 ejercicios): Fundamentos, Estructuras 
 Métodos e Interfaces, Manejo de Errores, Concurrencia, y Standard Library.
 Puedes explicar conceptos de programación, dar ejemplos de código, sugerir ejercicios, y responder preguntas. 
 Usa español neutro latinoamericano. Sé didáctico pero conciso.
+Responde breve por defecto. No repitas el roadmap completo salvo que te lo pidan.
+Si el usuario pide una sección concreta, enfócate solo en esa sección.
 Si te preguntan algo que no sabes, dilo con honestidad.
 NO eres un sensei del juego de mesa Go (weiqi/baduk). Eres un sensei de Golang.`
 
@@ -52,8 +61,6 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		systemPrompt = senseiSystemPrompt
 	}
 
-	contents := buildChatContents(history)
-
 	// Apply context timeout
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
@@ -64,7 +71,7 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		model,
 	)
 
-	body := buildChatRequestBody(systemPrompt, contents)
+	body := buildChatRequestBody(systemPrompt, history)
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -125,8 +132,66 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 }
 
 func buildChatContents(history []chatstore.ChatMessage) []map[string]interface{} {
-	contents := make([]map[string]interface{}, 0, len(history))
-	for _, msg := range history {
+	_, contents := buildChatPromptContext(history)
+	return contents
+}
+
+func buildChatRequestBody(systemPrompt string, history []chatstore.ChatMessage) map[string]interface{} {
+	memory, contents := buildChatPromptContext(history)
+	systemText := strings.TrimSpace(systemPrompt)
+	if memory != "" {
+		if systemText != "" {
+			systemText += "\n\n"
+		}
+		systemText += memory
+	}
+
+	if systemText == "" {
+		systemText = senseiSystemPrompt
+	}
+
+	return map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]interface{}{
+				{"text": systemText},
+			},
+		},
+		"contents": contents,
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.7,
+			"maxOutputTokens": chatMaxOutputTokens,
+		},
+	}
+}
+
+func buildChatPromptContext(history []chatstore.ChatMessage) (string, []map[string]interface{}) {
+	if len(history) == 0 {
+		return "", []map[string]interface{}{
+			{
+				"role":  "user",
+				"parts": []map[string]interface{}{{"text": "Hola"}},
+			},
+		}
+	}
+
+	start := 0
+	memoryLines := make([]string, 0, 4)
+	if len(history) > maxChatContextMessages {
+		dropped := history[:len(history)-maxChatContextMessages]
+		memoryLines = append(memoryLines, "Resumen breve del contexto previo:")
+		for _, msg := range dropped {
+			memoryLines = append(memoryLines, "- "+summarizeChatMessage(msg, maxChatMessageSummaryRunes))
+		}
+		start = len(history) - maxChatContextMessages
+	}
+
+	contents := make([]map[string]interface{}, 0, len(history)-start)
+	for _, msg := range history[start:] {
+		content, note := trimChatMessageForPrompt(msg)
+		if note != "" {
+			memoryLines = append(memoryLines, "- "+note)
+		}
+
 		role := "user"
 		if msg.Role == "sensei" {
 			role = "model"
@@ -134,37 +199,58 @@ func buildChatContents(history []chatstore.ChatMessage) []map[string]interface{}
 		contents = append(contents, map[string]interface{}{
 			"role": role,
 			"parts": []map[string]interface{}{
-				{"text": msg.Content},
+				{"text": content},
 			},
 		})
 	}
 
 	if len(contents) == 0 {
 		contents = append(contents, map[string]interface{}{
-			"role": "user",
-			"parts": []map[string]interface{}{
-				{"text": "Hola"},
-			},
+			"role":  "user",
+			"parts": []map[string]interface{}{{"text": "Hola"}},
 		})
 	}
 
-	return contents
+	return strings.Join(memoryLines, "\n"), contents
 }
 
-func buildChatRequestBody(systemPrompt string, contents []map[string]interface{}) map[string]interface{} {
-	// Keep the request minimal for gemma-4 compatibility.
-	return map[string]interface{}{
-		"system_instruction": map[string]interface{}{
-			"parts": []map[string]interface{}{
-				{"text": systemPrompt},
-			},
-		},
-		"contents": contents,
-		"generationConfig": map[string]interface{}{
-			"temperature":     0.7,
-			"maxOutputTokens": 2000,
-		},
+func trimChatMessageForPrompt(msg chatstore.ChatMessage) (string, string) {
+	normalized := normalizeChatText(msg.Content)
+	if normalized == "" {
+		return "", ""
 	}
+
+	trimmed := abbreviateChatText(normalized, maxChatMessagePromptRunes)
+	if trimmed == normalized {
+		return normalized, ""
+	}
+
+	return trimmed, summarizeChatMessage(msg, maxChatMessageSummaryRunes)
+}
+
+func summarizeChatMessage(msg chatstore.ChatMessage, maxRunes int) string {
+	label := "Usuario"
+	if msg.Role == "sensei" {
+		label = "Sensei"
+	}
+	return label + ": " + abbreviateChatText(normalizeChatText(msg.Content), maxRunes)
+}
+
+func normalizeChatText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+func abbreviateChatText(text string, maxRunes int) string {
+	if maxRunes < 1 {
+		return ""
+	}
+
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+
+	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
 }
 
 // extractTextOnly extracts only the actual response text from Gemini API response parts,

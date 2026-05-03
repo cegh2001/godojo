@@ -57,9 +57,6 @@ func (p *HintProvider) GetHint(ctx context.Context, exercise *domain.Exercise, t
 	errCh := make(chan error, 1)
 
 	go func() {
-		defer close(hintCh)
-		defer close(errCh)
-
 		// Apply our internal timeout
 		ctx, cancel := context.WithTimeout(ctx, p.timeout)
 		defer cancel()
@@ -73,6 +70,7 @@ func (p *HintProvider) GetHint(ctx context.Context, exercise *domain.Exercise, t
 			} else {
 				errCh <- fmt.Errorf("cliente de Gemini no inicializado.")
 			}
+			close(errCh)
 			return
 		}
 
@@ -87,6 +85,7 @@ func (p *HintProvider) GetHint(ctx context.Context, exercise *domain.Exercise, t
 			} else {
 				errCh <- fmt.Errorf("error al consultar al sensei (API): %w", err)
 			}
+			close(errCh)
 			return
 		}
 
@@ -95,10 +94,12 @@ func (p *HintProvider) GetHint(ctx context.Context, exercise *domain.Exercise, t
 		hint, err := domain.NewHint(exercise.Slug, response, requestedAt, receivedAt)
 		if err != nil {
 			errCh <- fmt.Errorf("error al crear la pista: %w", err)
+			close(errCh)
 			return
 		}
 
 		hintCh <- hint
+		close(hintCh)
 	}()
 
 	return hintCh, errCh
@@ -119,8 +120,6 @@ func buildSocraticPrompt(exercise *domain.Exercise, testOutput string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Eres un sensei de Go. No des la respuesta. Guía con preguntas socráticas.\n")
-	sb.WriteString("El estudiante está trabado en este ejercicio.\n\n")
 	sb.WriteString(fmt.Sprintf("📝 Ejercicio: %s\n", exercise.Title))
 	sb.WriteString(fmt.Sprintf("📂 Tema: %s\n\n", exercise.TopicSlug))
 
@@ -149,7 +148,7 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 		c.httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 
-	// Gemini API endpoint — uses gemini-2.5-flash for fast hints
+	// Gemini API endpoint — uses gemini-2.5-flash for fast, reliable hints
 	model := "gemini-2.5-flash"
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
@@ -157,6 +156,11 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 	)
 
 	body := map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]interface{}{
+				{"text": "Eres un sensei de Go. Das pistas socráticas. No das la solución completa. Usas español neutro latinoamericano."},
+			},
+		},
 		"contents": []map[string]interface{}{
 			{
 				"parts": []map[string]interface{}{

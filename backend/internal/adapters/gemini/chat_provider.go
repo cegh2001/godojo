@@ -14,8 +14,9 @@ import (
 	"godojo/internal/adapters/chatstore"
 )
 
-// ChatProvider handles chat conversations with a Gemma-4-31b-it model via the Gemini API.
-// It follows the same HTTP pattern used by realGeminiClient in hint_provider.go.
+// ChatProvider handles chat conversations with Gemma via the Gemini API.
+// Uses system_instruction for persona and contents for conversation history.
+// See: https://ai.google.dev/gemini-api/docs/system-instructions
 type ChatProvider struct {
 	apiKey  string
 	timeout time.Duration
@@ -36,7 +37,8 @@ sugerir ejercicios, y responder preguntas. Usa español neutro latinoamericano. 
 Si te preguntan algo que no sabes, dilo con honestidad.`
 
 // SendMessage sends a message to the Gemini API and returns the response.
-// It includes the full conversation history + system prompt.
+// Uses system_instruction for the sensei persona and contents for conversation.
+// Based on Gemini REST API spec: https://ai.google.dev/gemini-api/docs/system-instructions
 func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage) (string, error) {
 	if p.apiKey == "" {
 		return "", fmt.Errorf("Sensei no disponible — configura GEMINI_API_KEY en .env")
@@ -46,24 +48,10 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		systemPrompt = senseiSystemPrompt
 	}
 
-	// Build the contents array for the Gemini API
-	// First entry: system prompt as a "user" role message (Gemma doesn't support system role)
-	contents := []map[string]interface{}{
-		{
-			"role": "user",
-			"parts": []map[string]interface{}{
-				{"text": systemPrompt},
-			},
-		},
-		{
-			"role": "model",
-			"parts": []map[string]interface{}{
-				{"text": "Entendido. Soy el sensei de GoDojo. ¿En qué te puedo ayudar hoy?"},
-			},
-		},
-	}
-
-	// Add conversation history
+	// Build conversation contents (user/model alternating)
+	// First message: the user's latest input is NOT here — it was already added to history
+	// by the TUI before calling this. So we just send the full history.
+	contents := make([]map[string]interface{}, 0, len(history))
 	for _, msg := range history {
 		role := "user"
 		if msg.Role == "sensei" {
@@ -77,23 +65,37 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		})
 	}
 
+	// If no history (first message), start fresh
+	if len(contents) == 0 {
+		contents = append(contents, map[string]interface{}{
+			"role": "user",
+			"parts": []map[string]interface{}{
+				{"text": "Hola"},
+			},
+		})
+	}
+
 	// Apply context timeout
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	// Build the request
-	model := "gemma-4-31b-it"
+	// Build the request with system_instruction as separate field
+	model := "gemma-3-27b-it"
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		model, p.apiKey,
 	)
 
 	body := map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]interface{}{
+				{"text": systemPrompt},
+			},
+		},
 		"contents": contents,
 		"generationConfig": map[string]interface{}{
 			"temperature":     0.7,
 			"maxOutputTokens": 2000,
-			"topP":            0.95,
 		},
 	}
 

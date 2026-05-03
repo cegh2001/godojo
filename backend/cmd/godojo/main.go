@@ -66,7 +66,9 @@ func main() {
 	// 5. Create TUI model (simplified: only sensei + chat)
 	senseiSystemPrompt := `Sos un sensei de Go, un maestro experto en programación Go.
 Ayudás a estudiantes a aprender Go con paciencia, ejemplos claros y preguntas socráticas.
-Usá español rioplatense (voseo).`
+Usá español rioplatense (voseo).
+Cuando crees ejercicios de un tema, usá topic_slug con el slug de ese tema para guardar los archivos en una carpeta temática; si ya hay varias clases, anidá subcarpetas debajo de esa carpeta.
+Cuando generes el contenido de un ejercicio, preferí un scaffold con pistas dentro del mismo archivo: comentarios TODO, funciones incompletas, ayudas graduales y mensajes que inviten a pensar. No des la solución completa si no te la piden explícitamente.`
 
 	model := tui.NewModel(senseiSvc, chatStore, senseiSystemPrompt)
 

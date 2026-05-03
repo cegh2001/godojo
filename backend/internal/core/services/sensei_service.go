@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"godojo/internal/adapters/chatstore"
@@ -22,10 +23,12 @@ const (
 // It sends messages to the AI, executes function calls locally,
 // and feeds results back until a final text response is produced.
 type SenseiService struct {
-	provider   ports.SenseiProvider
-	tools      *core.ToolRegistry
-	workspace  ports.WorkspaceManager
-	roadmapSvc *RoadmapService
+	provider         ports.SenseiProvider
+	tools            *core.ToolRegistry
+	workspace        ports.WorkspaceManager
+	roadmapSvc       *RoadmapService
+	mu               sync.RWMutex
+	currentTopicSlug string
 }
 
 // NewSenseiService creates a SenseiService and registers the default tools.
@@ -189,27 +192,44 @@ func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, s
 func (s *SenseiService) registerCreateExerciseFile() {
 	s.tools.Register("create_exercise_file", domain.ToolDeclaration{
 		Name:        "create_exercise_file",
-		Description: "Crea un archivo .go en el workspace del estudiante. Usala cuando el estudiante pida practicar un concepto o crear un ejercicio.",
+		Description: "Crea un archivo .go o una ruta relativa dentro del workspace del estudiante. Usala cuando el estudiante pida practicar un concepto o crear un ejercicio. Si hay un topic_slug, guardá los archivos dentro de esa carpeta temática. El archivo debería ser un scaffold con pistas, no una solución completa, salvo que te la pidan explícitamente.",
 		Parameters: domain.ToolParameters{
 			Type: "OBJECT",
 			Properties: map[string]domain.ToolProperty{
-				"filename": {Type: "STRING", Description: "Nombre del archivo (debe terminar en .go)"},
-				"content":  {Type: "STRING", Description: "Contenido del archivo Go"},
+				"filename":   {Type: "STRING", Description: "Ruta relativa del archivo; puede incluir subcarpetas y debe terminar en .go"},
+				"topic_slug": {Type: "STRING", Description: "Slug del tema para agrupar archivos en una carpeta temática"},
+				"content":    {Type: "STRING", Description: "Contenido del archivo Go"},
 			},
 			Required: []string{"filename", "content"},
 		},
 	}, func(args map[string]interface{}) (interface{}, error) {
 		filename, _ := args["filename"].(string)
+		topicSlug, _ := args["topic_slug"].(string)
 		content, _ := args["content"].(string)
 
-		if err := s.workspace.CreateFile(filename, content); err != nil {
+		if topicSlug == "" {
+			topicSlug = s.getCurrentTopicSlug()
+		} else {
+			if _, err := s.roadmapSvc.GetTopicBySlug(topicSlug); err != nil {
+				return nil, err
+			}
+		}
+
+		relativePath := filename
+		if topicSlug != "" {
+			relativePath = joinTopicPath(topicSlug, filename)
+			s.setCurrentTopicSlug(topicSlug)
+		}
+
+		if err := s.workspace.CreateFile(relativePath, content); err != nil {
 			return nil, err
 		}
 
 		return map[string]interface{}{
-			"filename": filename,
-			"success":  true,
-			"message":  fmt.Sprintf("Archivo %q creado en tu workspace.", filename),
+			"filename":   relativePath,
+			"topic_slug": topicSlug,
+			"success":    true,
+			"message":    fmt.Sprintf("Archivo %q creado en tu workspace.", relativePath),
 		}, nil
 	})
 }
@@ -246,14 +266,40 @@ func (s *SenseiService) registerReadRoadmapSection() {
 
 		topic, topicErr := s.roadmapSvc.GetTopicBySlug(slug)
 		if topicErr == nil {
+			s.setCurrentTopicSlug(topic.Slug)
 			return map[string]interface{}{
-				"type":    "topic",
-				"slug":    topic.Slug,
-				"title":   topic.Title,
-				"summary": topic.Description,
+				"type":             "topic",
+				"slug":             topic.Slug,
+				"title":            topic.Title,
+				"summary":          topic.Description,
+				"workspace_folder": topic.Slug,
 			}, nil
 		}
 
 		return nil, fmt.Errorf("sección %q no encontrada (ni fase ni tema)", slug)
 	})
+}
+
+func (s *SenseiService) setCurrentTopicSlug(slug string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentTopicSlug = slug
+}
+
+func (s *SenseiService) getCurrentTopicSlug() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.currentTopicSlug
+}
+
+func joinTopicPath(topicSlug string, filename string) string {
+	normalizedTopic := strings.Trim(strings.ReplaceAll(topicSlug, "\\", "/"), "/")
+	normalizedFilename := strings.TrimLeft(strings.ReplaceAll(filename, "\\", "/"), "/")
+	if normalizedTopic == "" || normalizedFilename == "" {
+		return normalizedFilename
+	}
+	if normalizedFilename == normalizedTopic || strings.HasPrefix(normalizedFilename, normalizedTopic+"/") {
+		return normalizedFilename
+	}
+	return normalizedTopic + "/" + normalizedFilename
 }

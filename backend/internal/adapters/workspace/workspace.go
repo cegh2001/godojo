@@ -21,7 +21,8 @@ func NewWorkspaceManager(basePath string) *WorkspaceManager {
 }
 
 // CreateFile writes a file with the given content inside the workspace.
-// Only .go files are accepted. Path traversal via ".." is rejected.
+// Relative paths may include subdirectories. Only .go files are accepted.
+// Path traversal via ".." is rejected.
 func (w *WorkspaceManager) CreateFile(filename string, content string) error {
 	safe, err := w.safePath(filename)
 	if err != nil {
@@ -96,7 +97,7 @@ func (w *WorkspaceManager) WorkspacePath() string {
 	return w.basePath
 }
 
-// safePath validates and resolves a filename within the workspace.
+// safePath validates and resolves a relative path within the workspace.
 // Returns the absolute safe path or an error.
 func (w *WorkspaceManager) safePath(filename string) (string, error) {
 	// Reject empty filename

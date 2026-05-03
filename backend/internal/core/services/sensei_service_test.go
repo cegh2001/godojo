@@ -220,6 +220,57 @@ func TestSenseiService_SingleToolCall(t *testing.T) {
 	}
 }
 
+// TestSenseiService_TopicFolderFromRoadmap verifies that the latest consulted topic becomes the folder prefix.
+func TestSenseiService_TopicFolderFromRoadmap(t *testing.T) {
+	provider := &mockSenseiProvider{
+		responses: [][]domain.ContentPart{
+			{funcCallPart("read_roadmap_section", map[string]interface{}{
+				"section_slug": "variables",
+			})},
+			{funcCallPart("create_exercise_file", map[string]interface{}{
+				"filename": "clase-1.go",
+				"content":  "package main",
+			})},
+			{textPart("Creé el ejercicio dentro de variables/.")},
+		},
+	}
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, core.NewToolRegistry(), ws, roadmap)
+
+	session := newMockSession("topic-folder")
+	ctx := context.Background()
+
+	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Armame ejercicios de variables", session)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var statuses []string
+	for s := range statusCh {
+		statuses = append(statuses, s)
+	}
+
+	if response != "Creé el ejercicio dentro de variables/." {
+		t.Errorf("response = %q", response)
+	}
+
+	if _, ok := ws.files["variables/clase-1.go"]; !ok {
+		t.Fatalf("expected file to be created under variables/, got files: %v", ws.files)
+	}
+
+	found := false
+	for _, s := range statuses {
+		if strings.Contains(s, "create_exercise_file") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected create_exercise_file status, got: %v", statuses)
+	}
+}
+
 // TestSenseiService_MultiToolSequential tests 2 functionCalls in sequence → both execute → final text.
 func TestSenseiService_MultiToolSequential(t *testing.T) {
 	provider := &mockSenseiProvider{

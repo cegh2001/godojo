@@ -4,6 +4,7 @@ package ports
 // within the student's Go workspace (~/.godojo/workspace/).
 type WorkspaceManager interface {
 	// CreateFile writes a file with the given content to the workspace.
+	// The path can be relative and include subdirectories.
 	CreateFile(filename string, content string) error
 
 	// ReadFile reads a file from the workspace by name.

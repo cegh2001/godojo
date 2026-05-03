@@ -6,25 +6,26 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/spinner"
 	"godojo/internal/adapters/chatstore"
 	"godojo/internal/core/domain"
 	"godojo/internal/core/ports"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // tuiState represents the current view state in the TUI state machine.
 type tuiState int
 
 const (
-	stateRoadmapView    tuiState = iota // browsing phases/topics
-	stateTopicDetail                    // viewing topic info + exercises
-	stateExerciseView                   // viewing exercise description
-	stateTestRunning                    // spinner while tests run
-	stateTestResults                    // showing test output
-	stateHintDisplay                    // showing Socratic hint
-	stateSenseiChat                     // chat with AI sensei
-	stateSessionSelector                // session list overlay
+	stateRoadmapView     tuiState = iota // browsing phases/topics
+	stateTopicDetail                     // viewing topic info + exercises
+	stateExerciseView                    // viewing exercise description
+	stateTestRunning                     // spinner while tests run
+	stateTestResults                     // showing test output
+	stateHintDisplay                     // showing Socratic hint
+	stateSenseiChat                      // chat with AI sensei
+	stateSessionSelector                 // session list overlay
 )
 
 // roadmapService defines the interface for roadmap operations.
@@ -100,14 +101,15 @@ type Model struct {
 	lastTestOutput string
 
 	// Sensei chat
-	chatProvider   chatProvider
-	chatStore      *chatstore.ChatStore
-	chatSessions   []chatstore.ChatSession
-	chatMessages   []chatstore.ChatMessage
-	chatInput      string
-	chatLoading    bool
-	chatSessionID  string
-	chatPrunedMsg  string // notification about pruned session
+	chatProvider  chatProvider
+	chatStore     *chatstore.ChatStore
+	chatSessions  []chatstore.ChatSession
+	chatMessages  []chatstore.ChatMessage
+	chatInput     string
+	chatLoading   bool
+	chatScroll    int
+	chatSessionID string
+	chatPrunedMsg string // notification about pruned session
 }
 
 // roadmapLoadedMsg is sent when the roadmap is loaded from RoadmapService.
@@ -261,6 +263,38 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// When in session selector, handle differently
 	if m.state == stateSessionSelector {
 		return m.handleSessionSelectorKey(msg)
+	}
+
+	if m.state == stateSenseiChat {
+		switch msg.Type {
+		case tea.KeyUp:
+			m = m.shiftChatScroll(1)
+			return m, nil
+		case tea.KeyDown:
+			m = m.shiftChatScroll(-1)
+			return m, nil
+		case tea.KeyHome:
+			m.chatScroll = m.maxChatScroll(m.chatMessageAreaHeight())
+			return m, nil
+		case tea.KeyEnd:
+			m.chatScroll = 0
+			return m, nil
+		case tea.KeyPgUp:
+			m = m.shiftChatScroll(m.chatPageScrollStep())
+			return m, nil
+		case tea.KeyPgDown:
+			m = m.shiftChatScroll(-m.chatPageScrollStep())
+			return m, nil
+		}
+
+		switch msg.String() {
+		case "pgup", "pageup":
+			m = m.shiftChatScroll(m.chatPageScrollStep())
+			return m, nil
+		case "pgdown", "pagedown":
+			m = m.shiftChatScroll(-m.chatPageScrollStep())
+			return m, nil
+		}
 	}
 
 	switch msg.String() {
@@ -515,6 +549,7 @@ func (m Model) handleCtrlG() (tea.Model, tea.Cmd) {
 		m.chatSessionID = chatstore.NewSessionID()
 		m.chatMessages = nil
 	}
+	m.chatScroll = 0
 
 	return m, nil
 }
@@ -558,6 +593,7 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 
 	m.chatInput = ""
 	m.chatLoading = true
+	m.chatScroll = 0
 
 	// Dispatch async API call
 	if m.chatProvider == nil {
@@ -606,6 +642,7 @@ func (m Model) handleChatResponse(msg chatResponseMsg) (tea.Model, tea.Cmd) {
 		Time:    timeNow(),
 	})
 	m.chatLoading = false
+	m.chatScroll = 0
 
 	// Auto-save session
 	m.saveCurrentChatSession()
@@ -620,6 +657,7 @@ func (m Model) handleChatNew() (tea.Model, tea.Cmd) {
 	m.chatMessages = nil
 	m.chatInput = ""
 	m.chatLoading = false
+	m.chatScroll = 0
 	m.chatPrunedMsg = ""
 	return m, nil
 }
@@ -679,6 +717,7 @@ func (m Model) handleSessionSelect() (tea.Model, tea.Cmd) {
 	m.chatMessages = session.Messages
 	m.chatInput = ""
 	m.chatLoading = false
+	m.chatScroll = 0
 	m.chatPrunedMsg = ""
 	m.state = stateSenseiChat
 	m.cursor = 0

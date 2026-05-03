@@ -42,24 +42,92 @@ func TestViewSenseiChat_ShowsMessages(t *testing.T) {
 	}
 }
 
-func TestViewSenseiChat_ShowsHelpBar(t *testing.T) {
+func TestViewSenseiChat_WrapsLongMessages(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 40
+	m.height = 24
+	m.chatMessages = []chatstore.ChatMessage{
+		{
+			Role:    "sensei",
+			Content: "Este es un mensaje largo del sensei que debe envolver el texto para no cortarse al final.",
+			Time:    time.Now(),
+		},
+	}
+
+	view := m.View()
+	normalized := strings.Join(strings.Fields(view), " ")
+	if !strings.Contains(normalized, "cortarse al final") {
+		t.Error("long sensei messages should wrap instead of truncating their ending")
+	}
+}
+
+func TestRenderChatMessages_RespectsScrollOffset(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 40
+	m.height = 24
+	m.chatMessages = []chatstore.ChatMessage{
+		{Role: "user", Content: "mensaje uno", Time: time.Now()},
+		{Role: "sensei", Content: "respuesta uno", Time: time.Now()},
+		{Role: "user", Content: "mensaje dos", Time: time.Now()},
+		{Role: "sensei", Content: "respuesta dos", Time: time.Now()},
+		{Role: "user", Content: "mensaje tres", Time: time.Now()},
+	}
+
+	bottom := m.renderChatMessages(3)
+	if !strings.Contains(bottom, "mensaje tres") {
+		t.Fatal("bottom of chat should show the latest message")
+	}
+
+	m.chatScroll = 2
+	scrolled := m.renderChatMessages(3)
+	if strings.Contains(scrolled, "mensaje tres") {
+		t.Fatal("scrolled chat should move away from the latest message")
+	}
+	if !strings.Contains(scrolled, "respuesta uno") {
+		t.Fatal("scrolled chat should reveal older messages")
+	}
+}
+
+func TestShiftChatScroll_ClampsAndMoves(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 40
+	m.height = 8
+	m.chatMessages = []chatstore.ChatMessage{
+		{Role: "user", Content: "mensaje uno", Time: time.Now()},
+		{Role: "sensei", Content: "respuesta uno", Time: time.Now()},
+		{Role: "user", Content: "mensaje dos", Time: time.Now()},
+		{Role: "sensei", Content: "respuesta dos", Time: time.Now()},
+		{Role: "user", Content: "mensaje tres", Time: time.Now()},
+	}
+
+	next := m.shiftChatScroll(1)
+	if next.chatScroll != 1 {
+		t.Fatalf("chatScroll after first shift = %d, want 1", next.chatScroll)
+	}
+
+	next = next.shiftChatScroll(1)
+	if next.chatScroll != 2 {
+		t.Fatalf("chatScroll after second shift = %d, want 2", next.chatScroll)
+	}
+
+	next = next.shiftChatScroll(-1)
+	if next.chatScroll != 1 {
+		t.Fatalf("chatScroll after reverse shift = %d, want 1", next.chatScroll)
+	}
+}
+
+func TestViewSenseiChat_ShowsComposerPlaceholder(t *testing.T) {
 	m := newModelTest()
 	m.state = stateSenseiChat
 	m.width = 80
 	m.height = 24
 
 	view := m.View()
-	if !strings.Contains(view, "Enviar: Enter") {
-		t.Error("chat view should show 'Enviar: Enter' help")
-	}
-	if !strings.Contains(view, "Nueva: Ctrl+N") {
-		t.Error("chat view should show 'Nueva: Ctrl+N' help")
-	}
-	if !strings.Contains(view, "Sesiones: Ctrl+L") {
-		t.Error("chat view should show 'Sesiones: Ctrl+L' help")
-	}
-	if !strings.Contains(view, "Volver: Esc") {
-		t.Error("chat view should show 'Volver: Esc' help")
+	if !strings.Contains(view, "escribí tu mensaje") {
+		t.Error("empty chat should show a clear composer placeholder")
 	}
 }
 
@@ -77,10 +145,49 @@ func TestViewSenseiChat_ShowsLoadingIndicator(t *testing.T) {
 	if !strings.Contains(view, "pensando") {
 		t.Error("loading chat should show 'pensando...' indicator")
 	}
-	// Input area shows "..." while loading
-	view = m.View()
-	if !strings.Contains(view, "> ...") {
-		t.Error("loading chat should show '...' in input area")
+	if !strings.Contains(view, "Tú:") {
+		t.Error("loading chat should clearly show the user composer line")
+	}
+	if !strings.Contains(view, "enviando") {
+		t.Error("loading chat should show the send status in the composer")
+	}
+}
+
+func TestViewSenseiChat_ShowsScrollStatus(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 80
+	m.height = 8
+	m.chatScroll = 1
+	m.chatMessages = []chatstore.ChatMessage{
+		{Role: "user", Content: "mensaje uno", Time: time.Now()},
+		{Role: "sensei", Content: "respuesta uno", Time: time.Now()},
+		{Role: "user", Content: "mensaje dos", Time: time.Now()},
+		{Role: "sensei", Content: "respuesta dos", Time: time.Now()},
+		{Role: "user", Content: "mensaje tres", Time: time.Now()},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Viendo mensajes anteriores") {
+		t.Error("chat view should explain when the transcript is scrolled up")
+	}
+}
+
+func TestViewSenseiChat_ShowsHelpBar(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 80
+	m.height = 24
+
+	view := m.View()
+	if !strings.Contains(view, "Ctrl+N: nuevo chat") {
+		t.Error("chat view should show 'Ctrl+N: nuevo chat' help")
+	}
+	if !strings.Contains(view, "Ctrl+L: sesiones") {
+		t.Error("chat view should show 'Ctrl+L: sesiones' help")
+	}
+	if !strings.Contains(view, "Esc: volver") {
+		t.Error("chat view should show 'Esc: volver' help")
 	}
 }
 

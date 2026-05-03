@@ -52,59 +52,19 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		systemPrompt = senseiSystemPrompt
 	}
 
-	// Build conversation contents (user/model alternating)
-	// First message: the user's latest input is NOT here — it was already added to history
-	// by the TUI before calling this. So we just send the full history.
-	contents := make([]map[string]interface{}, 0, len(history))
-	for _, msg := range history {
-		role := "user"
-		if msg.Role == "sensei" {
-			role = "model"
-		}
-		contents = append(contents, map[string]interface{}{
-			"role": role,
-			"parts": []map[string]interface{}{
-				{"text": msg.Content},
-			},
-		})
-	}
-
-	// If no history (first message), start fresh
-	if len(contents) == 0 {
-		contents = append(contents, map[string]interface{}{
-			"role": "user",
-			"parts": []map[string]interface{}{
-				{"text": "Hola"},
-			},
-		})
-	}
+	contents := buildChatContents(history)
 
 	// Apply context timeout
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	// Build the request with system_instruction as separate field
 	model := "gemma-4-31b-it"
 	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		model, p.apiKey,
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
+		model,
 	)
 
-	body := map[string]interface{}{
-		"system_instruction": map[string]interface{}{
-			"parts": []map[string]interface{}{
-				{"text": systemPrompt},
-			},
-		},
-		"contents": contents,
-		"generationConfig": map[string]interface{}{
-			"temperature":     0.7,
-			"maxOutputTokens": 2000,
-		},
-		"thinkingConfig": map[string]interface{}{
-			"thinkingBudget": 0, // disable chain-of-thought for faster chat responses
-		},
-	}
+	body := buildChatRequestBody(systemPrompt, contents)
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -117,6 +77,7 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		return "", fmt.Errorf("error al crear la solicitud HTTP: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", p.apiKey)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -161,6 +122,49 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 	}
 
 	return text, nil
+}
+
+func buildChatContents(history []chatstore.ChatMessage) []map[string]interface{} {
+	contents := make([]map[string]interface{}, 0, len(history))
+	for _, msg := range history {
+		role := "user"
+		if msg.Role == "sensei" {
+			role = "model"
+		}
+		contents = append(contents, map[string]interface{}{
+			"role": role,
+			"parts": []map[string]interface{}{
+				{"text": msg.Content},
+			},
+		})
+	}
+
+	if len(contents) == 0 {
+		contents = append(contents, map[string]interface{}{
+			"role": "user",
+			"parts": []map[string]interface{}{
+				{"text": "Hola"},
+			},
+		})
+	}
+
+	return contents
+}
+
+func buildChatRequestBody(systemPrompt string, contents []map[string]interface{}) map[string]interface{} {
+	// Keep the request minimal for gemma-4 compatibility.
+	return map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]interface{}{
+				{"text": systemPrompt},
+			},
+		},
+		"contents": contents,
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.7,
+			"maxOutputTokens": 2000,
+		},
+	}
 }
 
 // extractTextOnly extracts only the actual response text from Gemini API response parts,

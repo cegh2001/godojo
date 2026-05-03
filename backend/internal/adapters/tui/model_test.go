@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"godojo/internal/adapters/chatstore"
 	"godojo/internal/core/domain"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // stubRoadmapService returns a minimal roadmap for testing.
@@ -744,12 +745,56 @@ func TestModel_Esc_FromSenseiChat_GoesBack(t *testing.T) {
 func TestModel_Esc_FromSessionSelector_GoesBackToChat(t *testing.T) {
 	m := newModelTest()
 	m.state = stateSessionSelector
+	m.chatSessionID = "test-session"
+	m.chatMessages = []chatstore.ChatMessage{
+		{Role: "user", Content: "Hola", Time: time.Now()},
+	}
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated := newM.(Model)
 
 	if updated.state != stateSenseiChat {
 		t.Errorf("after Esc from session selector, state = %v, want %v", updated.state, stateSenseiChat)
+	}
+}
+
+func TestModel_SessionSelector_Delete_RemovesSelectedSession(t *testing.T) {
+	store := chatstore.NewChatStore(t.TempDir())
+	session := &chatstore.ChatSession{
+		ID:        "s1",
+		Name:      "Sesión para borrar",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Messages: []chatstore.ChatMessage{
+			{Role: "user", Content: "Hola", Time: time.Now()},
+		},
+	}
+	if _, err := store.SaveSession(session); err != nil {
+		t.Fatalf("SaveSession() error: %v", err)
+	}
+
+	m := newModelTest()
+	m.state = stateSessionSelector
+	m.chatStore = store
+	m.chatSessions = []chatstore.ChatSession{*session}
+	m.chatSessionID = session.ID
+	m.chatMessages = session.Messages
+	m.cursor = 0
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDelete})
+	updated := newM.(Model)
+
+	if len(updated.chatSessions) != 0 {
+		t.Fatalf("expected 0 sessions after delete, got %d", len(updated.chatSessions))
+	}
+	if updated.chatSessionID != "" {
+		t.Error("current chat session should be cleared after deleting the active session")
+	}
+	if len(updated.chatMessages) != 0 {
+		t.Error("chat messages should be cleared after deleting the active session")
+	}
+	if _, err := store.LoadSession(session.ID); err == nil {
+		t.Error("deleted session should no longer exist on disk")
 	}
 }
 
@@ -791,12 +836,27 @@ func TestModel_ChatSend_EmptyInput_NoOp(t *testing.T) {
 	m := newModelTest()
 	m.state = stateSenseiChat
 	m.chatInput = "   "
-
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := newM.(Model)
 
 	if len(updated.chatMessages) != 0 {
 		t.Error("should not add message for empty/whitespace input")
+	}
+}
+
+func TestModel_ChatSend_CreatesSessionID_WhenBlank(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatInput = "¿Qué es una goroutine?"
+	m.chatProvider = &mockChatProvider{
+		response: "Una goroutine es un hilo ligero manejado por el runtime de Go.",
+	}
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := newM.(Model)
+
+	if updated.chatSessionID == "" {
+		t.Error("chatSessionID should be created when sending with an empty session")
 	}
 }
 

@@ -131,6 +131,22 @@ func TestViewSenseiChat_ShowsComposerPlaceholder(t *testing.T) {
 	}
 }
 
+func TestViewSenseiChat_ShowsTailOfLongInput(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 34
+	m.height = 24
+	m.chatInput = "PRINCIPIO-DE-TEXTO-MUY-LARGO-QUE-SE-DEJA-DE-VER-Y-FINAL-VISIBLE"
+
+	view := m.View()
+	if !strings.Contains(view, "FINAL-VISIBLE") {
+		t.Fatal("long input should keep the tail visible")
+	}
+	if strings.Contains(view, "PRINCIPIO-DE-TEXTO-MUY-LARGO") {
+		t.Fatal("long input should clip the hidden prefix")
+	}
+}
+
 func TestViewSenseiChat_ShowsLoadingIndicator(t *testing.T) {
 	m := newModelTest()
 	m.state = stateSenseiChat
@@ -288,6 +304,21 @@ func TestViewSessionSelector_ShowsCursor(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "→") {
 		t.Error("session selector should show cursor indicator")
+	}
+}
+
+func TestViewSessionSelector_ShowsDeleteHint(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSessionSelector
+	m.width = 80
+	m.height = 24
+	m.chatSessions = []chatstore.ChatSession{
+		{ID: "s1", Name: "Sesión 1", UpdatedAt: time.Now(), Messages: []chatstore.ChatMessage{{Role: "user", Content: "x"}}},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "del: eliminar") {
+		t.Error("session selector should show delete hint")
 	}
 }
 

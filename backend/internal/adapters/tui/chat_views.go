@@ -167,7 +167,8 @@ func (m Model) shiftChatScroll(delta int) Model {
 }
 
 func (m Model) renderChatInputLine() string {
-	prefix := userStyle.Render("Tú: ")
+	prefixText := "Tú: "
+	prefix := userStyle.Render(prefixText)
 	if m.chatLoading {
 		return prefix + infoStyle.Render("enviando...")
 	}
@@ -176,7 +177,12 @@ func (m Model) renderChatInputLine() string {
 		return prefix + infoStyle.Render("escribí tu mensaje")
 	}
 
-	return prefix + inputStyle.Render(m.chatInput)
+	visibleWidth := m.width - runewidth.StringWidth(prefixText)
+	if visibleWidth < 1 {
+		visibleWidth = 1
+	}
+
+	return prefix + inputStyle.Render(clipChatInputTail(m.chatInput, visibleWidth))
 }
 
 func (m Model) renderChatStatusLine() string {
@@ -191,6 +197,44 @@ func (m Model) renderChatStatusLine() string {
 	}
 
 	return infoStyle.Render("Enter: enviar | ↑/↓: scroll | PgUp/PgDn: salto")
+}
+
+func clipChatInputTail(text string, width int) string {
+	if width < 1 {
+		return ""
+	}
+
+	if runewidth.StringWidth(text) <= width {
+		return text
+	}
+
+	ellipsis := "…"
+	ellipsisWidth := runewidth.StringWidth(ellipsis)
+	if width <= ellipsisWidth {
+		return tailTextByWidth(text, width)
+	}
+
+	return ellipsis + tailTextByWidth(text, width-ellipsisWidth)
+}
+
+func tailTextByWidth(text string, width int) string {
+	if width < 1 {
+		return ""
+	}
+
+	runes := []rune(text)
+	currentWidth := 0
+	start := len(runes)
+	for start > 0 {
+		runeWidth := runewidth.RuneWidth(runes[start-1])
+		if currentWidth+runeWidth > width {
+			break
+		}
+		currentWidth += runeWidth
+		start--
+	}
+
+	return string(runes[start:])
 }
 
 func renderWrappedChatMessage(role, content string, width int) []string {
@@ -342,7 +386,7 @@ func (m Model) viewSessionSelector() string {
 		))
 	}
 
-	sb.WriteString("\n" + helpStyle.Render("enter: cargar sesión  esc: volver"))
+	sb.WriteString("\n" + helpStyle.Render("enter: cargar sesión  del: eliminar  esc: volver"))
 	return sb.String()
 }
 

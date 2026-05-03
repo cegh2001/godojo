@@ -583,6 +583,10 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.chatSessionID == "" {
+		m.chatSessionID = chatstore.NewSessionID()
+	}
+
 	// Add user message
 	now := timeNow()
 	m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
@@ -684,6 +688,11 @@ func (m Model) handleChatList() (tea.Model, tea.Cmd) {
 
 // handleSessionSelectorKey handles key presses in the session selector overlay.
 func (m Model) handleSessionSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyDelete:
+		return m.handleSessionDelete()
+	}
+
 	switch msg.String() {
 	case "esc":
 		return m.handleEsc()
@@ -693,7 +702,45 @@ func (m Model) handleSessionSelectorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCursorUp()
 	case "down", "j":
 		return m.handleCursorDown()
+	case "del", "delete", "ctrl+d":
+		return m.handleSessionDelete()
 	}
+	return m, nil
+}
+
+// handleSessionDelete removes the selected session from disk and refreshes the selector state.
+func (m Model) handleSessionDelete() (tea.Model, tea.Cmd) {
+	if m.cursor < 0 || m.cursor >= len(m.chatSessions) {
+		return m, nil
+	}
+
+	if m.chatStore == nil {
+		return m, nil
+	}
+
+	selected := m.chatSessions[m.cursor]
+	if err := m.chatStore.DeleteSession(selected.ID); err != nil {
+		return m, nil
+	}
+
+	deletedCurrent := selected.ID == m.chatSessionID
+	m.chatSessions = append(m.chatSessions[:m.cursor], m.chatSessions[m.cursor+1:]...)
+	if m.cursor >= len(m.chatSessions) && m.cursor > 0 {
+		m.cursor--
+	}
+	if len(m.chatSessions) == 0 {
+		m.cursor = 0
+	}
+
+	if deletedCurrent {
+		m.chatSessionID = ""
+		m.chatMessages = nil
+		m.chatInput = ""
+		m.chatLoading = false
+		m.chatScroll = 0
+		m.chatPrunedMsg = ""
+	}
+
 	return m, nil
 }
 

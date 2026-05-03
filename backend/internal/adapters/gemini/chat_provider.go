@@ -250,7 +250,14 @@ func abbreviateChatText(text string, maxRunes int) string {
 		return text
 	}
 
-	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
+	ellipsis := "..."
+	ellipsisRunes := []rune(ellipsis)
+	if maxRunes <= len(ellipsisRunes) {
+		return string(ellipsisRunes[:maxRunes])
+	}
+
+	cutoff := maxRunes - len(ellipsisRunes)
+	return strings.TrimSpace(string(runes[:cutoff])) + ellipsis
 }
 
 // extractTextOnly extracts only the actual response text from Gemini API response parts,

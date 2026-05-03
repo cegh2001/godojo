@@ -80,7 +80,7 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 	defer cancel()
 
 	// Build the request with system_instruction as separate field
-	model := "gemma-3-27b-it"
+	model := "gemini-2.5-flash"
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		model, p.apiKey,
@@ -123,7 +123,11 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 	}
 
 	if resp.StatusCode != 200 {
-		return fmt.Sprintf("El sensei no está disponible ahora (error %d). Intenta de nuevo en unos segundos.", resp.StatusCode), nil
+		bodyPreview := string(respBody)
+		if len(bodyPreview) > 200 {
+			bodyPreview = bodyPreview[:200] + "..."
+		}
+		return fmt.Sprintf("El sensei no está disponible ahora (error %d: %s). Intenta de nuevo en unos segundos.", resp.StatusCode, bodyPreview), nil
 	}
 
 	// Parse the response

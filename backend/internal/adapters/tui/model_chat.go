@@ -36,6 +36,11 @@ func (m Model) handleChatTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if msg.Paste {
+		m.chatInput += normalizePastedChatInput(string(msg.Runes))
+		return m, nil
+	}
+
 	for _, r := range msg.Runes {
 		m.chatInput += string(r)
 	}
@@ -52,17 +57,20 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 		m.chatSessionID = chatstore.NewSessionID()
 	}
 
+	historyBeforeSend := append([]chatstore.ChatMessage(nil), m.chatMessages...)
+	now := timeNow()
+	m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
+		Role:    "user",
+		Content: input,
+		Time:    now,
+	})
+
 	m.chatInput = ""
 	m.chatLoading = true
 	m.chatScroll = 0
+	m.saveCurrentChatSession()
 
 	if m.senseiSvc == nil {
-		now := timeNow()
-		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
-			Role:    "user",
-			Content: input,
-			Time:    now,
-		})
 		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
 			Role:    "sensei",
 			Content: "Sensei no disponible — configura GEMINI_API_KEY en .env",
@@ -73,16 +81,16 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m, m.sendSenseiCmd(input)
+	return m, m.sendSenseiCmd(input, historyBeforeSend)
 }
 
-func (m Model) sendSenseiCmd(userMessage string) tea.Cmd {
+func (m Model) sendSenseiCmd(userMessage string, history []chatstore.ChatMessage) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 
 		session := &chatstore.ChatSession{
 			ID:       m.chatSessionID,
-			Messages: m.chatMessages,
+			Messages: history,
 		}
 
 		response, statusUpdates, err := m.senseiSvc.ProcessMessage(ctx, m.senseiSystemPrompt, userMessage, session)
@@ -119,6 +127,10 @@ func (m Model) handleChatResponse(msg chatResponseMsg) (tea.Model, tea.Cmd) {
 	m.saveCurrentChatSession()
 
 	return m, nil
+}
+
+func normalizePastedChatInput(text string) string {
+	return strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(text)
 }
 
 func (m Model) handleChatNew() (tea.Model, tea.Cmd) {

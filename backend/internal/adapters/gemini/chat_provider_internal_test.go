@@ -1,7 +1,11 @@
 package gemini
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -339,6 +343,144 @@ func TestExtractContentParts_MixedTextAndFunctionCall(t *testing.T) {
 	// Part 2: text "El archivo está listo."
 	if result[2].Text != "El archivo está listo." {
 		t.Errorf("last text = %q", result[2].Text)
+	}
+}
+
+func TestFormatGeminiAPIError(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		wantParts  []string
+		avoidParts []string
+	}{
+		{
+			name:       "internal 500 from gemini is explained without raw json",
+			statusCode: 500,
+			body: `{
+				"error": {
+					"code": 500,
+					"message": "Internal error encountered.",
+					"status": "INTERNAL"
+				}
+			}`,
+			wantParts: []string{
+				"Gemini devolvió INTERNAL (500)",
+				"Internal error encountered.",
+				"fallo interno del proveedor",
+				"Probá de nuevo en unos segundos.",
+			},
+			avoidParts: []string{"\"error\"", "{", "}"},
+		},
+		{
+			name:       "fallback keeps useful preview when body is not json",
+			statusCode: 502,
+			body:       "upstream exploded badly",
+			wantParts: []string{
+				"Gemini devolvió HTTP_502 (502)",
+				"upstream exploded badly",
+				"fallo interno del proveedor",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatGeminiAPIError(tt.statusCode, []byte(tt.body))
+
+			for _, want := range tt.wantParts {
+				if !strings.Contains(got, want) {
+					t.Errorf("formatted message = %q, want substring %q", got, want)
+				}
+			}
+
+			for _, avoid := range tt.avoidParts {
+				if strings.Contains(got, avoid) {
+					t.Errorf("formatted message = %q, should not contain %q", got, avoid)
+				}
+			}
+		})
+	}
+}
+
+func TestChatProvider_DoGenerateContentRequest_RetriesRetryableStatuses(t *testing.T) {
+	tests := []struct {
+		name          string
+		statuses      []int
+		wantAttempts  int32
+		wantStatus    int
+		wantBodyPart  string
+	}{
+		{
+			name:         "retries once on internal error",
+			statuses:     []int{http.StatusInternalServerError, http.StatusOK},
+			wantAttempts: 2,
+			wantStatus:   http.StatusOK,
+			wantBodyPart: "ok after retry",
+		},
+		{
+			name:         "retries once on rate limit",
+			statuses:     []int{http.StatusTooManyRequests, http.StatusOK},
+			wantAttempts: 2,
+			wantStatus:   http.StatusOK,
+			wantBodyPart: "ok after retry",
+		},
+		{
+			name:         "does not retry non retryable client error",
+			statuses:     []int{http.StatusBadRequest},
+			wantAttempts: 1,
+			wantStatus:   http.StatusBadRequest,
+			wantBodyPart: "bad request",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var attempts int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				current := int(atomic.AddInt32(&attempts, 1)) - 1
+				status := tt.statuses[current]
+
+				w.Header().Set("Content-Type", "application/json")
+				if status == http.StatusTooManyRequests {
+					w.Header().Set("Retry-After", "0")
+				}
+				w.WriteHeader(status)
+
+				switch status {
+				case http.StatusOK:
+					_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok after retry"}]}}]}`))
+				case http.StatusBadRequest:
+					_, _ = w.Write([]byte(`bad request`))
+				default:
+					_, _ = w.Write([]byte(`{"error":{"code":500,"message":"retry me","status":"INTERNAL"}}`))
+				}
+			}))
+			defer server.Close()
+
+			provider := &ChatProvider{
+				apiKey:     "test-key",
+				timeout:    time.Second,
+				httpClient: server.Client(),
+			}
+
+			respBody, statusCode, err := provider.doGenerateContentRequest(context.Background(), time.Second, server.URL, map[string]interface{}{
+				"contents": []map[string]interface{}{{"role": "user"}},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if statusCode != tt.wantStatus {
+				t.Fatalf("statusCode = %d, want %d", statusCode, tt.wantStatus)
+			}
+			if atomic.LoadInt32(&attempts) != tt.wantAttempts {
+				t.Fatalf("attempts = %d, want %d", attempts, tt.wantAttempts)
+			}
+			if !strings.Contains(string(respBody), tt.wantBodyPart) {
+				t.Fatalf("response body = %q, want substring %q", string(respBody), tt.wantBodyPart)
+			}
+		})
 	}
 }
 

@@ -6,9 +6,25 @@ import (
 	"time"
 
 	"godojo/internal/adapters/chatstore"
+	"godojo/internal/core"
+	"godojo/internal/core/domain"
+	"godojo/internal/core/services"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type stubSenseiProvider struct {
+	parts []domain.ContentPart
+	err   error
+}
+
+func (s stubSenseiProvider) SendMessage(_ context.Context, _ string, _ []chatstore.ChatMessage, _ []domain.ToolDeclaration) ([]domain.ContentPart, error) {
+	return s.parts, s.err
+}
+
+func (s stubSenseiProvider) SendFunctionResponse(_ context.Context, _ []chatstore.ChatMessage, _ string, _ string, _ interface{}) ([]domain.ContentPart, error) {
+	return s.parts, s.err
+}
 
 func TestModel_CtrlG_TransitionsToSenseiChat(t *testing.T) {
 	// Ctrl+G from sensei chat stays in sensei chat and creates session ID if blank
@@ -165,6 +181,77 @@ func TestModel_ChatSend_CreatesSessionID_WhenBlank(t *testing.T) {
 
 	if updated.chatSessionID == "" {
 		t.Error("chatSessionID should be created when sending with an empty session")
+	}
+}
+
+func TestModel_ChatSend_WithSenseiService_ShowsUserInputImmediately(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatSessionID = "test-session"
+	m.chatInput = "Necesito ayuda con slices"
+	m.senseiSvc = services.NewSenseiService(
+		stubSenseiProvider{parts: []domain.ContentPart{{Text: "Vamos con slices."}}},
+		core.NewToolRegistry(),
+		nil,
+		services.NewRoadmapService(),
+	)
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := newM.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected async command when sensei service exists")
+	}
+	if len(updated.chatMessages) != 1 {
+		t.Fatalf("expected 1 local user message before response, got %d", len(updated.chatMessages))
+	}
+	if updated.chatMessages[0].Role != "user" {
+		t.Errorf("first local message role = %q, want user", updated.chatMessages[0].Role)
+	}
+	if updated.chatMessages[0].Content != "Necesito ayuda con slices" {
+		t.Errorf("first local message content = %q", updated.chatMessages[0].Content)
+	}
+	if !updated.chatLoading {
+		t.Error("chatLoading should stay true while waiting for sensei response")
+	}
+	if updated.chatInput != "" {
+		t.Error("chatInput should be cleared after enqueueing the message")
+	}
+	if updated.chatScroll != 0 {
+		t.Errorf("chatScroll = %d, want 0", updated.chatScroll)
+	}
+	_ = cmd
+}
+
+func TestModel_ChatPaste_DoesNotSendOnPastedEnter(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatSessionID = "test-session"
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hola\nmundo"), Paste: true})
+	updated := newM.(Model)
+
+	if updated.chatInput != "hola mundo" {
+		t.Errorf("chatInput = %q, want %q", updated.chatInput, "hola mundo")
+	}
+	if len(updated.chatMessages) != 0 {
+		t.Fatalf("expected no messages after pasted text, got %d", len(updated.chatMessages))
+	}
+
+	newM, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter, Paste: true})
+	updated = newM.(Model)
+
+	if cmd != nil {
+		t.Error("pasted enter should not dispatch a send command")
+	}
+	if len(updated.chatMessages) != 0 {
+		t.Fatalf("expected no sent messages after pasted enter, got %d", len(updated.chatMessages))
+	}
+	if updated.chatInput != "hola mundo" {
+		t.Errorf("chatInput should be preserved after pasted enter, got %q", updated.chatInput)
+	}
+	if updated.chatLoading {
+		t.Error("chatLoading should remain false after pasted enter")
 	}
 }
 

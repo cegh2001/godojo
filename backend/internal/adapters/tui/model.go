@@ -94,7 +94,7 @@ func NewModel(
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
-	return m.spinner.Tick
+	return tea.Batch(m.spinner.Tick, tea.EnableBracketedPaste)
 }
 
 // Update handles messages and updates the model state.
@@ -104,6 +104,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global quit: Ctrl+C always works
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+
+		if m.state == stateSenseiChat && msg.Paste {
+			return m.handleChatTextInput(msg)
 		}
 
 		// SenseiChat key handling

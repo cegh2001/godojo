@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,15 @@ import (
 type ChatProvider struct {
 	apiKey  string
 	timeout time.Duration
+	httpClient *http.Client
+}
+
+type geminiAPIErrorEnvelope struct {
+	Error struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Status  string `json:"status"`
+	} `json:"error"`
 }
 
 const (
@@ -28,6 +38,9 @@ const (
 	maxChatMessagePromptRunes  = 360
 	maxChatMessageSummaryRunes = 140
 	chatMaxOutputTokens        = 1200
+	geminiMaxAttempts          = 3
+	geminiBaseRetryDelay       = 250 * time.Millisecond
+	geminiMaxRetryDelay        = 2 * time.Second
 )
 
 // NewChatProvider creates a ChatProvider using the GEMINI_API_KEY environment variable.
@@ -80,36 +93,13 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 
 	body := buildChatRequestBody(systemPrompt, history, tools)
 
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("error al preparar la solicitud: %w", err)
-	}
-
-	httpClient := &http.Client{Timeout: effectiveTimeout}
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("error al crear la solicitud HTTP: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", p.apiKey)
-
-	resp, err := httpClient.Do(req)
+	respBody, statusCode, err := p.doGenerateContentRequest(ctx, effectiveTimeout, url, body)
 	if err != nil {
 		return []domain.ContentPart{{Text: fmt.Sprintf("Error de conexión con el sensei: %v. ¿Revisaste tu conexión a internet?", err)}}, nil
 	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error al leer la respuesta: %w", err)
-	}
-
-	if resp.StatusCode != 200 {
-		bodyPreview := string(respBody)
-		if len(bodyPreview) > 200 {
-			bodyPreview = bodyPreview[:200] + "..."
-		}
-		return []domain.ContentPart{{Text: fmt.Sprintf("El sensei no está disponible ahora (error %d: %s). Intenta de nuevo en unos segundos.", resp.StatusCode, bodyPreview)}}, nil
+	if statusCode != http.StatusOK {
+		return []domain.ContentPart{{Text: formatGeminiAPIError(statusCode, respBody)}}, nil
 	}
 
 	// Parse the response
@@ -283,6 +273,128 @@ func abbreviateChatText(text string, maxRunes int) string {
 	return strings.TrimSpace(string(runes[:cutoff])) + ellipsis
 }
 
+func formatGeminiAPIError(statusCode int, respBody []byte) string {
+	statusLabel := fmt.Sprintf("HTTP_%d", statusCode)
+	detail := abbreviateChatText(normalizeChatText(string(respBody)), 180)
+
+	var envelope geminiAPIErrorEnvelope
+	if err := json.Unmarshal(respBody, &envelope); err == nil {
+		if envelope.Error.Status != "" {
+			statusLabel = envelope.Error.Status
+		}
+		if envelope.Error.Message != "" {
+			detail = abbreviateChatText(normalizeChatText(envelope.Error.Message), 180)
+		}
+		if envelope.Error.Code != 0 {
+			statusCode = envelope.Error.Code
+		}
+	}
+
+	message := fmt.Sprintf("El sensei no está disponible ahora: Gemini devolvió %s (%d).", statusLabel, statusCode)
+	if detail != "" {
+		message += " " + detail
+	}
+
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		message += " Revisá la configuración de GEMINI_API_KEY."
+	case http.StatusTooManyRequests:
+		message += " Parece un límite temporal de cuota o de requests del proveedor."
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		message += " Parece un fallo interno del proveedor, no de tu ejercicio."
+	}
+
+	message += " Probá de nuevo en unos segundos."
+	return message
+}
+
+func (p *ChatProvider) doGenerateContentRequest(ctx context.Context, timeout time.Duration, url string, body map[string]interface{}) ([]byte, int, error) {
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error al preparar la solicitud: %w", err)
+	}
+
+	httpClient := p.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+
+	for attempt := 0; attempt < geminiMaxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, 0, fmt.Errorf("error al crear la solicitud HTTP: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-goog-api-key", p.apiKey)
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, 0, fmt.Errorf("error al leer la respuesta: %w", readErr)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			return respBody, resp.StatusCode, nil
+		}
+
+		if !shouldRetryGeminiStatus(resp.StatusCode) || attempt == geminiMaxAttempts-1 {
+			return respBody, resp.StatusCode, nil
+		}
+
+		if err := waitForGeminiRetry(ctx, attempt, resp.Header.Get("Retry-After")); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	return nil, 0, fmt.Errorf("Gemini no devolvió respuesta")
+}
+
+func shouldRetryGeminiStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+func waitForGeminiRetry(ctx context.Context, attempt int, retryAfter string) error {
+	delay := geminiRetryDelay(attempt, retryAfter)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func geminiRetryDelay(attempt int, retryAfter string) time.Duration {
+	if retryAfter != "" {
+		if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds > 0 {
+			return minDuration(time.Duration(seconds)*time.Second, geminiMaxRetryDelay)
+		}
+		if retryAt, err := http.ParseTime(retryAfter); err == nil {
+			delay := time.Until(retryAt)
+			if delay > 0 {
+				return minDuration(delay, geminiMaxRetryDelay)
+			}
+		}
+	}
+
+	delay := time.Duration(attempt+1) * geminiBaseRetryDelay
+	return minDuration(delay, geminiMaxRetryDelay)
+}
+
+func minDuration(a time.Duration, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // extractContentParts extracts content parts from the Gemini API response.
 // Parses both text and functionCall keys, skipping thought parts.
 func extractContentParts(parts []map[string]interface{}) []domain.ContentPart {
@@ -424,36 +536,13 @@ func (p *ChatProvider) SendFunctionResponse(ctx context.Context, history []chats
 		},
 	}
 
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("error al preparar la solicitud: %w", err)
-	}
-
-	httpClient := &http.Client{Timeout: p.timeout}
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("error al crear la solicitud HTTP: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", p.apiKey)
-
-	resp, err := httpClient.Do(req)
+	respBody, statusCode, err := p.doGenerateContentRequest(ctx, p.timeout, url, body)
 	if err != nil {
 		return []domain.ContentPart{{Text: fmt.Sprintf("Error de conexión con el sensei: %v. ¿Revisaste tu conexión a internet?", err)}}, nil
 	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error al leer la respuesta: %w", err)
-	}
-
-	if resp.StatusCode != 200 {
-		bodyPreview := string(respBody)
-		if len(bodyPreview) > 200 {
-			bodyPreview = bodyPreview[:200] + "..."
-		}
-		return []domain.ContentPart{{Text: fmt.Sprintf("El sensei no está disponible ahora (error %d: %s). Intenta de nuevo en unos segundos.", resp.StatusCode, bodyPreview)}}, nil
+	if statusCode != http.StatusOK {
+		return []domain.ContentPart{{Text: formatGeminiAPIError(statusCode, respBody)}}, nil
 	}
 
 	var result2 struct {

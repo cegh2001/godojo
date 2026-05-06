@@ -41,22 +41,20 @@ func TestNewModel_StoresSenseiSvc(t *testing.T) {
 	}
 }
 
-func TestModel_Init_ReturnsSpinnerTick(t *testing.T) {
+func TestModel_Init_ReturnsStartupCommands(t *testing.T) {
 	m := newModelTest()
 	cmd := m.Init()
 
 	if cmd == nil {
-		t.Fatal("Init() returned nil command, expected spinner.Tick")
+		t.Fatal("Init() returned nil command, expected startup commands")
 	}
 
-	// Execute the command and check it returns spinner.TickMsg
 	msg := cmd()
 	if msg == nil {
 		t.Fatal("command produced nil message")
 	}
-	_, ok := msg.(spinner.TickMsg)
-	if !ok {
-		t.Errorf("command produced %T, want spinner.TickMsg", msg)
+	if _, ok := msg.(tea.BatchMsg); !ok {
+		t.Errorf("command produced %T, want tea.BatchMsg", msg)
 	}
 }
 

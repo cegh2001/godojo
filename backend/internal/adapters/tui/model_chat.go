@@ -68,6 +68,7 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 	m.chatInput = ""
 	m.chatLoading = true
 	m.chatScroll = 0
+	m.toolStatus = ""
 	m.saveCurrentChatSession()
 
 	if m.senseiSvc == nil {
@@ -95,26 +96,29 @@ func (m Model) sendSenseiCmd(userMessage string, history []chatstore.ChatMessage
 
 		response, statusUpdates, err := m.senseiSvc.ProcessMessage(ctx, m.senseiSystemPrompt, userMessage, session)
 
-		// Drain status updates in background if channel exists
+		var finalStatus string
 		if statusUpdates != nil {
-			go func() {
-				for status := range statusUpdates {
-					_ = status // status updates handled via toolStatusMsg in Update
+			for status := range statusUpdates {
+				if strings.HasPrefix(status, "Métricas:") {
+					finalStatus = status
 				}
-			}()
+			}
 		}
 
 		if err != nil {
-			return senseiResponseMsg{content: err.Error(), err: err}
+			return senseiResponseMsg{content: err.Error(), err: err, status: finalStatus}
 		}
 
-		return senseiResponseMsg{content: response, err: nil}
+		return senseiResponseMsg{content: response, err: nil, status: finalStatus}
 	}
 }
 
 func (m Model) handleChatResponse(msg chatResponseMsg) (tea.Model, tea.Cmd) {
 	if msg.content == "" && msg.err != nil {
 		msg.content = fmt.Sprintf("Error: %v", msg.err)
+	}
+	if msg.status != "" {
+		m.toolStatus = msg.status
 	}
 
 	m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{

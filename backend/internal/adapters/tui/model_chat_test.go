@@ -47,6 +47,21 @@ func TestModel_ChatResponseMsg_AppendsMessage(t *testing.T) {
 	}
 }
 
+func TestModel_ChatResponseMsg_StoresFinalStatus(t *testing.T) {
+	m := newModelTest()
+	m.chatLoading = true
+
+	newM, _ := m.Update(chatResponseMsg{content: "Respuesta del sensei", status: "Métricas: 1.2s · 1 ronda · 1 llamada al modelo · 0 herramientas"})
+	updated := newM.(Model)
+
+	if updated.toolStatus == "" {
+		t.Fatal("toolStatus should keep the final metrics summary")
+	}
+	if updated.toolStatus != "Métricas: 1.2s · 1 ronda · 1 llamada al modelo · 0 herramientas" {
+		t.Errorf("toolStatus = %q", updated.toolStatus)
+	}
+}
+
 func TestModel_ChatResponseMsg_Error(t *testing.T) {
 	m := newModelTest()
 	m.chatLoading = true

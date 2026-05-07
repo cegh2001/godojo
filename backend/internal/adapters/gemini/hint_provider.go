@@ -21,9 +21,9 @@ type GeminiClient interface {
 
 // HintProvider implements ports.HintProvider using the Gemini API.
 type HintProvider struct {
-	apiKey    string
-	client    GeminiClient
-	timeout   time.Duration
+	apiKey  string
+	client  GeminiClient
+	timeout time.Duration
 }
 
 // NewHintProvider creates a HintProvider using the GEMINI_API_KEY environment variable.
@@ -148,8 +148,8 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 		c.httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 
-	// Gemini API endpoint — uses gemini-2.5-flash for fast, reliable hints
-	model := "gemini-2.5-flash"
+	// Gemini API endpoint — uses the fast Gemma 4 model for lightweight hints
+	model := defaultFastModel
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		model, c.apiKey,

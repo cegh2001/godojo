@@ -9,6 +9,7 @@ type ContentPart struct {
 
 // FunctionCall represents a tool invocation requested by the sensei.
 type FunctionCall struct {
+	ID   string                 `json:"id,omitempty"`
 	Name string                 `json:"name"`
 	Args map[string]interface{} `json:"args"`
 }

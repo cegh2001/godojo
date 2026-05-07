@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -22,10 +23,14 @@ import (
 // mockSenseiProvider implements ports.SenseiProvider with preset responses.
 // Each entry in responses corresponds to one call (SendMessage or SendFunctionResponse).
 type mockSenseiProvider struct {
-	mu        sync.Mutex
-	responses [][]domain.ContentPart
-	callCount int
-	err       error // if set, return this error instead of next response
+	mu                         sync.Mutex
+	responses                  [][]domain.ContentPart
+	callCount                  int
+	sendCalls                  int
+	functionResponseCalls      int
+	lastFunctionResponseCallID string
+	lastFunctionResponseResult interface{}
+	err                        error // if set, return this error instead of next response
 }
 
 func (m *mockSenseiProvider) nextResponse() ([]domain.ContentPart, error) {
@@ -43,10 +48,18 @@ func (m *mockSenseiProvider) nextResponse() ([]domain.ContentPart, error) {
 }
 
 func (m *mockSenseiProvider) SendMessage(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) ([]domain.ContentPart, error) {
+	m.mu.Lock()
+	m.sendCalls++
+	m.mu.Unlock()
 	return m.nextResponse()
 }
 
 func (m *mockSenseiProvider) SendFunctionResponse(ctx context.Context, history []chatstore.ChatMessage, callID string, name string, result interface{}) ([]domain.ContentPart, error) {
+	m.mu.Lock()
+	m.functionResponseCalls++
+	m.lastFunctionResponseCallID = callID
+	m.lastFunctionResponseResult = result
+	m.mu.Unlock()
 	return m.nextResponse()
 }
 
@@ -78,6 +91,7 @@ func (w *mockWorkspace) ListFiles() ([]string, error) {
 	for name := range w.files {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names, nil
 }
 
@@ -97,6 +111,16 @@ func textPart(text string) domain.ContentPart {
 func funcCallPart(name string, args map[string]interface{}) domain.ContentPart {
 	return domain.ContentPart{
 		FunctionCall: &domain.FunctionCall{
+			Name: name,
+			Args: args,
+		},
+	}
+}
+
+func funcCallPartWithID(id string, name string, args map[string]interface{}) domain.ContentPart {
+	return domain.ContentPart{
+		FunctionCall: &domain.FunctionCall{
+			ID:   id,
 			Name: name,
 			Args: args,
 		},
@@ -160,7 +184,7 @@ func TestSenseiService_SingleToolCall(t *testing.T) {
 	provider := &mockSenseiProvider{
 		responses: [][]domain.ContentPart{
 			// First call: functionCall to create_exercise_file
-			{funcCallPart("create_exercise_file", map[string]interface{}{
+			{funcCallPartWithID("call-create-1", "create_exercise_file", map[string]interface{}{
 				"filename": "hola.go",
 				"content":  "package main\n\nfunc main() {}",
 			})},
@@ -207,6 +231,15 @@ func TestSenseiService_SingleToolCall(t *testing.T) {
 	if response != "Listo, creé el archivo hola.go en tu workspace." {
 		t.Errorf("response = %q", response)
 	}
+	if provider.sendCalls != 1 {
+		t.Errorf("SendMessage calls = %d, want 1", provider.sendCalls)
+	}
+	if provider.functionResponseCalls != 1 {
+		t.Errorf("SendFunctionResponse calls = %d, want 1", provider.functionResponseCalls)
+	}
+	if provider.lastFunctionResponseCallID != "call-create-1" {
+		t.Errorf("last function response call ID = %q, want %q", provider.lastFunctionResponseCallID, "call-create-1")
+	}
 
 	// Verify "Ejecutando create_exercise_file..." status was sent
 	found := false
@@ -217,6 +250,126 @@ func TestSenseiService_SingleToolCall(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected 'Ejecutando create_exercise_file...' status, got: %v", statuses)
+	}
+}
+
+func TestSenseiService_ListWorkspaceFilesTool(t *testing.T) {
+	provider := &mockSenseiProvider{
+		responses: [][]domain.ContentPart{
+			{funcCallPartWithID("call-list-1", "list_workspace_files", map[string]interface{}{})},
+			{textPart("Tenés archivos en el workspace.")},
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	ws.files["maps/ejercicio.go"] = "package main"
+	ws.files["variables/clase-1.go"] = "package main"
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+
+	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-workspace-list"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if response != "Tenés archivos en el workspace." {
+		t.Fatalf("response = %q", response)
+	}
+
+	result, ok := provider.lastFunctionResponseResult.(map[string]interface{})
+	if !ok {
+		t.Fatalf("tool result = %#v", provider.lastFunctionResponseResult)
+	}
+	if result["count"] != 2 {
+		t.Fatalf("count = %#v", result["count"])
+	}
+	files, ok := result["files"].([]string)
+	if !ok {
+		t.Fatalf("files = %#v", result["files"])
+	}
+	expected := []string{"maps/ejercicio.go", "variables/clase-1.go"}
+	if strings.Join(files, ",") != strings.Join(expected, ",") {
+		t.Fatalf("files = %v, want %v", files, expected)
+	}
+}
+
+func TestSenseiService_ReadWorkspaceFileTool(t *testing.T) {
+	provider := &mockSenseiProvider{
+		responses: [][]domain.ContentPart{
+			{funcCallPartWithID("call-read-1", "read_workspace_file", map[string]interface{}{"filename": "variables/clase-1.go"})},
+			{textPart("Revisé el archivo del workspace.")},
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	ws.files["variables/clase-1.go"] = "package main\n\nfunc main() {}"
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+
+	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Revisá mi archivo", newMockSession("s-workspace-read"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if response != "Revisé el archivo del workspace." {
+		t.Fatalf("response = %q", response)
+	}
+
+	result, ok := provider.lastFunctionResponseResult.(map[string]interface{})
+	if !ok {
+		t.Fatalf("tool result = %#v", provider.lastFunctionResponseResult)
+	}
+	if result["filename"] != "variables/clase-1.go" {
+		t.Fatalf("filename = %#v", result["filename"])
+	}
+	content, ok := result["content"].(string)
+	if !ok {
+		t.Fatalf("content = %#v", result["content"])
+	}
+	if !strings.Contains(content, "func main() {}") {
+		t.Fatalf("content = %q", content)
+	}
+}
+
+func TestSenseiService_ReadRecentWorkspaceFileTool(t *testing.T) {
+	provider := &mockSenseiProvider{
+		responses: [][]domain.ContentPart{
+			{funcCallPartWithID("call-create-1", "create_exercise_file", map[string]interface{}{
+				"filename":   "introduccion_tipos_de_datos.go",
+				"topic_slug": "tipos",
+				"content":    "package main\n\n// TODO: completar runas",
+			})},
+			{funcCallPartWithID("call-read-recent-1", "read_recent_workspace_file", map[string]interface{}{})},
+			{textPart("Leí el archivo reciente y puedo revisarlo contigo.")},
+		},
+	}
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, core.NewToolRegistry(), ws, roadmap)
+
+	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Empecemos con tipos y luego revisalo", newMockSession("s-workspace-recent"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if response != "Leí el archivo reciente y puedo revisarlo contigo." {
+		t.Fatalf("response = %q", response)
+	}
+
+	if _, ok := ws.files["tipos/introduccion_tipos_de_datos.go"]; !ok {
+		t.Fatalf("expected file under tipos/, got files: %v", ws.files)
+	}
+
+	result, ok := provider.lastFunctionResponseResult.(map[string]interface{})
+	if !ok {
+		t.Fatalf("tool result = %#v", provider.lastFunctionResponseResult)
+	}
+	if result["filename"] != "tipos/introduccion_tipos_de_datos.go" {
+		t.Fatalf("filename = %#v", result["filename"])
+	}
+	content, ok := result["content"].(string)
+	if !ok {
+		t.Fatalf("content = %#v", result["content"])
+	}
+	if !strings.Contains(content, "runas") {
+		t.Fatalf("content = %q", content)
 	}
 }
 
@@ -336,6 +489,12 @@ func TestSenseiService_MultiToolSequential(t *testing.T) {
 
 	if response != "Creé el ejercicio. ¿Lo ejecutamos?" {
 		t.Errorf("response = %q", response)
+	}
+	if provider.sendCalls != 1 {
+		t.Errorf("SendMessage calls = %d, want 1", provider.sendCalls)
+	}
+	if provider.functionResponseCalls != 2 {
+		t.Errorf("SendFunctionResponse calls = %d, want 2", provider.functionResponseCalls)
 	}
 
 	// Should have executed both tools
@@ -570,13 +729,20 @@ func TestSenseiService_StatusChannel(t *testing.T) {
 
 	// Verify "Pensando..." appears
 	pensandoFound := false
+	metricsFound := false
 	for _, s := range statuses {
 		if s == "Pensando..." {
 			pensandoFound = true
 		}
+		if strings.HasPrefix(s, "Métricas:") {
+			metricsFound = true
+		}
 	}
 	if !pensandoFound {
 		t.Errorf("expected 'Pensando...' status, got: %v", statuses)
+	}
+	if !metricsFound {
+		t.Errorf("expected a metrics status, got: %v", statuses)
 	}
 
 	// Verify channel is closed after goroutine finishes

@@ -2,8 +2,10 @@ package gemini
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,7 +15,7 @@ import (
 	"godojo/internal/core/domain"
 )
 
-func TestBuildChatRequestBody_OmitsThinkingConfig(t *testing.T) {
+func TestBuildChatRequestBody_UsesFastDefaults(t *testing.T) {
 	history := []chatstore.ChatMessage{
 		{Role: "user", Content: "Hola", Time: time.Now()},
 		{Role: "sensei", Content: "Respuesta", Time: time.Now()},
@@ -30,13 +32,16 @@ func TestBuildChatRequestBody_OmitsThinkingConfig(t *testing.T) {
 		t.Fatalf("generationConfig should be a map, got %T", body["generationConfig"])
 	}
 
-	// Now thinkingConfig SHOULD be present in generationConfig
+	// thinkingConfig SHOULD be present inside generationConfig
 	tc, ok := generationConfig["thinkingConfig"].(map[string]interface{})
 	if !ok {
-		t.Fatal("generationConfig.thinkingConfig should be present for gemma-4 function calling")
+		t.Fatal("generationConfig.thinkingConfig should be present")
 	}
-	if level, ok := tc["thinkingLevel"]; !ok || level != "HIGH" {
-		t.Fatalf("thinkingLevel should be HIGH, got %v", level)
+	if budget, ok := tc["thinkingBudget"]; !ok || budget != defaultChatThinkingBudget {
+		t.Fatalf("thinkingBudget should be %d, got %v", defaultChatThinkingBudget, budget)
+	}
+	if tokens, ok := generationConfig["maxOutputTokens"]; !ok || tokens != defaultChatMaxOutputTokens {
+		t.Fatalf("maxOutputTokens should be %d, got %v", defaultChatMaxOutputTokens, tokens)
 	}
 
 	contents, ok := body["contents"].([]map[string]interface{})
@@ -131,8 +136,8 @@ func TestBuildToolsJSON_FormatsFunctionDeclarations(t *testing.T) {
 
 	result := buildToolsJSON(tools)
 
-	if len(result) != 2 {
-		t.Fatalf("expected 2 tool entries (functionDeclarations + googleSearch), got %d", len(result))
+	if len(result) != 1 {
+		t.Fatalf("expected 1 tool entry (functionDeclarations), got %d", len(result))
 	}
 
 	// First entry should have functionDeclarations
@@ -155,9 +160,8 @@ func TestBuildToolsJSON_FormatsFunctionDeclarations(t *testing.T) {
 		t.Errorf("function description = %v", fd["description"])
 	}
 
-	// Second entry: googleSearch
-	if _, ok := result[1]["googleSearch"]; !ok {
-		t.Error("second tool entry should be googleSearch")
+	if _, ok := result[0]["googleSearch"]; ok {
+		t.Error("googleSearch should be opt-in for local tool usage")
 	}
 }
 
@@ -235,9 +239,91 @@ func TestBuildChatRequestBody_IncludesThinkingConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("generationConfig.thinkingConfig should be present")
 	}
-	level, ok := tc["thinkingLevel"]
-	if !ok || level != "HIGH" {
-		t.Fatalf("thinkingLevel should be HIGH, got %v", level)
+	budget, ok := tc["thinkingBudget"]
+	if !ok || budget != defaultChatThinkingBudget {
+		t.Fatalf("thinkingBudget should be %d, got %v", defaultChatThinkingBudget, budget)
+	}
+}
+
+func TestBuildInteractionRequestBody_ExcludesGenerationConfig(t *testing.T) {
+	body := buildInteractionRequestBody("Sos un sensei.", []chatstore.ChatMessage{{Role: "user", Content: "Hola", Time: time.Now()}}, []domain.ToolDeclaration{{
+		Name:        "create_file",
+		Description: "Crea un archivo",
+		Parameters: domain.ToolParameters{
+			Type:       "OBJECT",
+			Properties: map[string]domain.ToolProperty{},
+		},
+	}}, defaultChatRequestConfig())
+
+	if _, ok := body["generationConfig"]; ok {
+		t.Fatal("interactions request body should not include generationConfig")
+	}
+	if _, ok := body["model"]; !ok {
+		t.Fatal("interactions request body should include model")
+	}
+	if _, ok := body["input"]; !ok {
+		t.Fatal("interactions request body should include input")
+	}
+}
+
+func TestBuildInteractionFunctionResultInput_NormalizesStructuredResult(t *testing.T) {
+	input := buildInteractionFunctionResultInput("call-1", "create_file", map[string]interface{}{
+		"success": true,
+		"path":    "hola.go",
+	})
+
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input entry, got %d", len(input))
+	}
+	result, ok := input[0]["result"].(string)
+	if !ok {
+		t.Fatalf("result should be normalized to string, got %T", input[0]["result"])
+	}
+	if !strings.Contains(result, `"success":true`) {
+		t.Fatalf("result = %q, want serialized JSON", result)
+	}
+}
+
+func TestBuildToolsJSONWithGoogleSearch_OptIn(t *testing.T) {
+	tools := []domain.ToolDeclaration{
+		{
+			Name:        "read_roadmap_section",
+			Description: "Lee una sección del roadmap",
+			Parameters: domain.ToolParameters{
+				Type:       "OBJECT",
+				Properties: map[string]domain.ToolProperty{},
+			},
+		},
+	}
+
+	result := buildToolsJSONWithGoogleSearch(tools, true)
+	if len(result) != 2 {
+		t.Fatalf("expected functionDeclarations + googleSearch, got %d entries", len(result))
+	}
+	if _, ok := result[1]["googleSearch"]; !ok {
+		t.Fatal("googleSearch entry should be present when explicitly enabled")
+	}
+}
+
+func TestLoadChatRequestConfigFromEnv(t *testing.T) {
+	t.Setenv("GODOJO_SENSEI_MODEL", defaultHeavyModel)
+	t.Setenv("GODOJO_SENSEI_MAX_OUTPUT_TOKENS", "512")
+	t.Setenv("GODOJO_SENSEI_THINKING_BUDGET", "0")
+	t.Setenv("GODOJO_SENSEI_ENABLE_GOOGLE_SEARCH", "true")
+
+	cfg := loadChatRequestConfigFromEnv()
+
+	if cfg.model != defaultHeavyModel {
+		t.Fatalf("model = %q", cfg.model)
+	}
+	if cfg.maxOutputTokens != 512 {
+		t.Fatalf("maxOutputTokens = %d", cfg.maxOutputTokens)
+	}
+	if cfg.thinkingBudget != 0 {
+		t.Fatalf("thinkingBudget = %d", cfg.thinkingBudget)
+	}
+	if !cfg.enableGoogleSearch {
+		t.Fatal("googleSearch should be enabled from env")
 	}
 }
 
@@ -283,6 +369,7 @@ func TestExtractContentParts_ParsesFunctionCall(t *testing.T) {
 	parts := []map[string]interface{}{
 		{
 			"functionCall": map[string]interface{}{
+				"id":   "call-123",
 				"name": "create_file",
 				"args": map[string]interface{}{
 					"filename": "hola.go",
@@ -299,6 +386,9 @@ func TestExtractContentParts_ParsesFunctionCall(t *testing.T) {
 	}
 	if result[0].FunctionCall == nil {
 		t.Fatal("expected FunctionCall to be non-nil")
+	}
+	if result[0].FunctionCall.ID != "call-123" {
+		t.Errorf("function ID = %q, want call-123", result[0].FunctionCall.ID)
 	}
 	if result[0].FunctionCall.Name != "create_file" {
 		t.Errorf("function name = %q, want create_file", result[0].FunctionCall.Name)
@@ -381,6 +471,22 @@ func TestFormatGeminiAPIError(t *testing.T) {
 				"upstream exploded badly",
 				"fallo interno del proveedor",
 			},
+		},
+		{
+			name:       "rate limit with string code is parsed and explained",
+			statusCode: 429,
+			body: `{
+				"error": {
+					"message": "You do not have enough quota to make this request.",
+					"code": "too_many_requests"
+				}
+			}`,
+			wantParts: []string{
+				"Gemini devolvió TOO_MANY_REQUESTS (429)",
+				"You do not have enough quota to make this request.",
+				"límite de cuota o rate limit",
+			},
+			avoidParts: []string{"\"error\"", "{"},
 		},
 	}
 
@@ -529,4 +635,197 @@ func TestBuildFunctionResponseMessage_Format(t *testing.T) {
 	if response["filename"] != "hola.go" {
 		t.Errorf("response filename = %v", response["filename"])
 	}
+}
+
+func TestParseInteractionResponse_FunctionCallAndText(t *testing.T) {
+	respBody := []byte(`{
+		"id": "interaction-123",
+		"outputs": [
+			{"type": "function_call", "name": "create_file", "arguments": {"filename": "hola.go"}, "id": "call-123"},
+			{"type": "text", "text": "Listo"}
+		]
+	}`)
+
+	parts, interactionID, err := parseInteractionResponse(respBody)
+	if err != nil {
+		t.Fatalf("parseInteractionResponse error: %v", err)
+	}
+	if interactionID != "interaction-123" {
+		t.Fatalf("interactionID = %q", interactionID)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+	if parts[0].FunctionCall == nil {
+		t.Fatal("first part should be a function call")
+	}
+	if parts[0].FunctionCall.ID != "call-123" {
+		t.Fatalf("function call ID = %q", parts[0].FunctionCall.ID)
+	}
+	if parts[1].Text != "Listo" {
+		t.Fatalf("text part = %q", parts[1].Text)
+	}
+}
+
+func TestChatProvider_SendMessage_UsesInteractionsForTools(t *testing.T) {
+	type capturedRequest struct {
+		Path string
+		Body map[string]interface{}
+	}
+
+	var captured capturedRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		captured.Path = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&captured.Body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"interaction-1","outputs":[{"type":"function_call","name":"create_file","arguments":{"filename":"hola.go"},"id":"call-1"}]}`))
+	}))
+	defer server.Close()
+
+	provider := &ChatProvider{
+		apiKey:        "test-key",
+		timeout:       time.Second,
+		toolTimeout:   time.Second,
+		httpClient:    redirectedHTTPClient(t, server.URL),
+		requestConfig: defaultChatRequestConfig(),
+		callContexts:  make(map[string]interactionContext),
+	}
+
+	parts, err := provider.SendMessage(context.Background(), "Sos un sensei.", []chatstore.ChatMessage{{Role: "user", Content: "Creá un archivo", Time: time.Now()}}, []domain.ToolDeclaration{{
+		Name:        "create_file",
+		Description: "Crea un archivo",
+		Parameters: domain.ToolParameters{
+			Type: "OBJECT",
+			Properties: map[string]domain.ToolProperty{
+				"filename": {Type: "STRING", Description: "Nombre"},
+			},
+			Required: []string{"filename"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("SendMessage error: %v", err)
+	}
+	if captured.Path != "/v1beta/interactions" {
+		t.Fatalf("request path = %q", captured.Path)
+	}
+	if _, ok := captured.Body["generationConfig"]; ok {
+		t.Fatal("interactions request should not send generationConfig")
+	}
+	if len(parts) != 1 || parts[0].FunctionCall == nil {
+		t.Fatalf("expected 1 function call part, got %+v", parts)
+	}
+	if parts[0].FunctionCall.ID != "call-1" {
+		t.Fatalf("function call ID = %q", parts[0].FunctionCall.ID)
+	}
+	ctxData, ok := provider.takeInteractionContext("call-1")
+	if !ok {
+		t.Fatal("interaction context should be stored for call-1")
+	}
+	if ctxData.interactionID != "interaction-1" {
+		t.Fatalf("interactionID = %q", ctxData.interactionID)
+	}
+	toolsRaw, ok := captured.Body["tools"].([]interface{})
+	if !ok || len(toolsRaw) != 1 {
+		t.Fatalf("tools = %#v", captured.Body["tools"])
+	}
+}
+
+func TestChatProvider_SendFunctionResponse_UsesInteractionsContinuation(t *testing.T) {
+	type capturedRequest struct {
+		Path string
+		Body map[string]interface{}
+	}
+
+	var captured capturedRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		captured.Path = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&captured.Body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"interaction-2","outputs":[{"type":"text","text":"Archivo creado"}]}`))
+	}))
+	defer server.Close()
+
+	provider := &ChatProvider{
+		apiKey:        "test-key",
+		timeout:       time.Second,
+		toolTimeout:   time.Second,
+		httpClient:    redirectedHTTPClient(t, server.URL),
+		requestConfig: defaultChatRequestConfig(),
+		callContexts: map[string]interactionContext{
+			"call-1": {
+				interactionID: "interaction-1",
+				systemPrompt:  "Sos un sensei.",
+				tools: []domain.ToolDeclaration{{
+					Name:        "create_file",
+					Description: "Crea un archivo",
+					Parameters:  domain.ToolParameters{Type: "OBJECT"},
+				}},
+			},
+		},
+	}
+
+	parts, err := provider.SendFunctionResponse(context.Background(), nil, "call-1", "create_file", map[string]interface{}{"success": true})
+	if err != nil {
+		t.Fatalf("SendFunctionResponse error: %v", err)
+	}
+	if captured.Path != "/v1beta/interactions" {
+		t.Fatalf("request path = %q", captured.Path)
+	}
+	if _, ok := captured.Body["generationConfig"]; ok {
+		t.Fatal("interaction continuation should not send generationConfig")
+	}
+	if captured.Body["previous_interaction_id"] != "interaction-1" {
+		t.Fatalf("previous_interaction_id = %#v", captured.Body["previous_interaction_id"])
+	}
+	inputRaw, ok := captured.Body["input"].([]interface{})
+	if !ok || len(inputRaw) != 1 {
+		t.Fatalf("input = %#v", captured.Body["input"])
+	}
+	inputEntry, ok := inputRaw[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("input[0] = %#v", inputRaw[0])
+	}
+	if inputEntry["call_id"] != "call-1" {
+		t.Fatalf("call_id = %#v", inputEntry["call_id"])
+	}
+	result, ok := inputEntry["result"].(string)
+	if !ok {
+		t.Fatalf("result = %#v", inputEntry["result"])
+	}
+	if !strings.Contains(result, `"success":true`) {
+		t.Fatalf("result = %q", result)
+	}
+	if len(parts) != 1 || parts[0].Text != "Archivo creado" {
+		t.Fatalf("parts = %+v", parts)
+	}
+	if _, ok := provider.takeInteractionContext("call-1"); ok {
+		t.Fatal("call-1 context should be consumed after continuation")
+	}
+}
+
+func redirectedHTTPClient(t *testing.T, serverURL string) *http.Client {
+	t.Helper()
+	parsedURL, err := url.Parse(serverURL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	original := http.DefaultTransport
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		clone := req.Clone(req.Context())
+		clone.URL.Scheme = parsedURL.Scheme
+		clone.URL.Host = parsedURL.Host
+		return original.RoundTrip(clone)
+	})}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

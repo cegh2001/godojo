@@ -171,6 +171,36 @@ func TestListFiles_ReturnsSortedAndCreatesDir(t *testing.T) {
 	}
 }
 
+func TestListFiles_IncludesNestedGoFiles(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	if err := wm.CreateFile("variables/clase-1.go", "package main"); err != nil {
+		t.Fatalf("CreateFile nested failed: %v", err)
+	}
+	if err := wm.CreateFile("maps/ejercicio.go", "package main"); err != nil {
+		t.Fatalf("CreateFile nested failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variables", "notas.txt"), []byte("ignorar"), 0644); err != nil {
+		t.Fatalf("WriteFile nested txt failed: %v", err)
+	}
+
+	files, err := wm.ListFiles()
+	if err != nil {
+		t.Fatalf("ListFiles() error: %v", err)
+	}
+
+	expected := []string{"maps/ejercicio.go", "variables/clase-1.go"}
+	if len(files) != len(expected) {
+		t.Fatalf("expected %d files, got %d: %v", len(expected), len(files), files)
+	}
+	for i := range expected {
+		if files[i] != expected[i] {
+			t.Errorf("files[%d] = %q, want %q", i, files[i], expected[i])
+		}
+	}
+}
+
 func TestWorkspacePath(t *testing.T) {
 	dir := t.TempDir()
 	wm := workspace.NewWorkspaceManager(dir)

@@ -24,6 +24,7 @@ func TestContentPartJSONRoundTrip(t *testing.T) {
 			name: "functionCall only — JSON has 'functionCall' nested object",
 			input: domain.ContentPart{
 				FunctionCall: &domain.FunctionCall{
+					ID:   "call-123",
 					Name: "create_exercise_file",
 					Args: map[string]interface{}{
 						"filename": "hola-mundo.go",
@@ -38,6 +39,7 @@ func TestContentPartJSONRoundTrip(t *testing.T) {
 			input: domain.ContentPart{
 				Text: "Voy a crear un archivo:",
 				FunctionCall: &domain.FunctionCall{
+					ID:   "call-456",
 					Name: "create_exercise_file",
 					Args: map[string]interface{}{
 						"filename": "variables.go",
@@ -86,6 +88,10 @@ func TestContentPartJSONRoundTrip(t *testing.T) {
 					t.Errorf("round-trip FunctionCall.Name = %q, want %q",
 						roundTripped.FunctionCall.Name, tt.input.FunctionCall.Name)
 				}
+				if roundTripped.FunctionCall.ID != tt.input.FunctionCall.ID {
+					t.Errorf("round-trip FunctionCall.ID = %q, want %q",
+						roundTripped.FunctionCall.ID, tt.input.FunctionCall.ID)
+				}
 			}
 		})
 	}
@@ -94,6 +100,7 @@ func TestContentPartJSONRoundTrip(t *testing.T) {
 func TestFunctionCallEmptyArgsRoundTrip(t *testing.T) {
 	// FunctionCall with empty (but non-nil) Args must survive round-trip
 	fc := domain.FunctionCall{
+		ID:   "call-empty",
 		Name: "read_roadmap_section",
 		Args: map[string]interface{}{},
 	}
@@ -111,6 +118,9 @@ func TestFunctionCallEmptyArgsRoundTrip(t *testing.T) {
 	if roundTripped.Name != fc.Name {
 		t.Errorf("Name = %q, want %q", roundTripped.Name, fc.Name)
 	}
+	if roundTripped.ID != fc.ID {
+		t.Errorf("ID = %q, want %q", roundTripped.ID, fc.ID)
+	}
 
 	if len(roundTripped.Args) != 0 {
 		t.Errorf("Args len = %d, want 0", len(roundTripped.Args))
@@ -120,6 +130,7 @@ func TestFunctionCallEmptyArgsRoundTrip(t *testing.T) {
 func TestFunctionCallNilArgsRoundTrip(t *testing.T) {
 	// FunctionCall with nil Args must survive round-trip
 	fc := domain.FunctionCall{
+		ID:   "call-nil",
 		Name: "no_args_tool",
 		Args: nil,
 	}
@@ -136,6 +147,9 @@ func TestFunctionCallNilArgsRoundTrip(t *testing.T) {
 
 	if roundTripped.Name != fc.Name {
 		t.Errorf("Name = %q, want %q", roundTripped.Name, fc.Name)
+	}
+	if roundTripped.ID != fc.ID {
+		t.Errorf("ID = %q, want %q", roundTripped.ID, fc.ID)
 	}
 
 	if roundTripped.Args != nil {
@@ -158,7 +172,7 @@ func TestContentPartOmitempty(t *testing.T) {
 		},
 		{
 			name:      "functionCall only omits text",
-			cp:        domain.ContentPart{FunctionCall: &domain.FunctionCall{Name: "f", Args: map[string]interface{}{"a": 1}}},
+			cp:        domain.ContentPart{FunctionCall: &domain.FunctionCall{ID: "call-1", Name: "f", Args: map[string]interface{}{"a": 1}}},
 			assertKey: "functionCall",
 			assertNot: "text",
 		},

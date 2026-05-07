@@ -59,12 +59,14 @@ type toolStatusMsg struct {
 type senseiResponseMsg struct {
 	content string
 	err     error
+	status  string
 }
 
 // chatResponseMsg is sent when the sensei responds.
 type chatResponseMsg struct {
 	content string
 	err     error
+	status  string
 }
 
 // chatSessionsLoadedMsg is sent when the session list is loaded from the store.
@@ -134,7 +136,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.spinner.Tick
 
 	case senseiResponseMsg:
-		return m.handleChatResponse(chatResponseMsg{content: msg.content, err: msg.err})
+		return m.handleChatResponse(chatResponseMsg{content: msg.content, err: msg.err, status: msg.status})
 
 	case chatResponseMsg:
 		return m.handleChatResponse(msg)

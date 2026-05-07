@@ -19,16 +19,42 @@ const (
 	statusChannelBufSize = 10
 )
 
+type senseiRunMetrics struct {
+	startedAt     time.Time
+	rounds        int
+	providerCalls int
+	toolCalls     int
+}
+
+func newSenseiRunMetrics() senseiRunMetrics {
+	return senseiRunMetrics{startedAt: time.Now()}
+}
+
+func (m senseiRunMetrics) statusLine() string {
+	elapsed := time.Since(m.startedAt).Round(10 * time.Millisecond)
+	return fmt.Sprintf(
+		"Métricas: %s · %d %s · %d %s al modelo · %d %s",
+		elapsed,
+		m.rounds,
+		pluralizeSpanish(m.rounds, "ronda", "rondas"),
+		m.providerCalls,
+		pluralizeSpanish(m.providerCalls, "llamada", "llamadas"),
+		m.toolCalls,
+		pluralizeSpanish(m.toolCalls, "herramienta", "herramientas"),
+	)
+}
+
 // SenseiService orchestrates the agentic AI loop.
 // It sends messages to the AI, executes function calls locally,
 // and feeds results back until a final text response is produced.
 type SenseiService struct {
-	provider         ports.SenseiProvider
-	tools            *core.ToolRegistry
-	workspace        ports.WorkspaceManager
-	roadmapSvc       *RoadmapService
-	mu               sync.RWMutex
-	currentTopicSlug string
+	provider            ports.SenseiProvider
+	tools               *core.ToolRegistry
+	workspace           ports.WorkspaceManager
+	roadmapSvc          *RoadmapService
+	mu                  sync.RWMutex
+	currentTopicSlug    string
+	recentWorkspaceFile string
 }
 
 // NewSenseiService creates a SenseiService and registers the default tools.
@@ -48,6 +74,9 @@ func NewSenseiService(
 	// Register built-in tools
 	svc.registerCreateExerciseFile()
 	svc.registerReadRoadmapSection()
+	svc.registerListWorkspaceFiles()
+	svc.registerReadWorkspaceFile()
+	svc.registerReadRecentWorkspaceFile()
 
 	return svc
 }
@@ -103,10 +132,12 @@ func (s *SenseiService) ProcessMessage(ctx context.Context, systemPrompt string,
 // runAgentLoop executes the agent loop: send → parse → execute tools → repeat.
 func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, session *chatstore.ChatSession, statusCh chan<- string) {
 	toolDeclarations := s.tools.GetDeclarations()
+	metrics := newSenseiRunMetrics()
 
 	for round := 0; round < maxAgentRounds; round++ {
 		select {
 		case <-ctx.Done():
+			statusCh <- metrics.statusLine()
 			statusCh <- "error:Se agotó el tiempo. Reformulá la pregunta."
 			return
 		default:
@@ -114,47 +145,52 @@ func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, s
 
 		// Send "Pensando..." status
 		statusCh <- "Pensando..."
+		metrics.rounds++
+		metrics.providerCalls++
 
 		parts, err := s.provider.SendMessage(ctx, systemPrompt, session.Messages, toolDeclarations)
 		if err != nil {
+			statusCh <- metrics.statusLine()
 			statusCh <- fmt.Sprintf("error:Error del sensei: %v", err)
 			return
 		}
 
-		// Separate text and functionCall parts
-		var textParts []string
-		var functionCalls []domain.FunctionCall
+		for {
+			// Separate text and functionCall parts
+			var textParts []string
+			var functionCalls []domain.FunctionCall
 
-		for _, part := range parts {
-			if part.FunctionCall != nil {
-				functionCalls = append(functionCalls, *part.FunctionCall)
-			}
-			if part.Text != "" {
-				textParts = append(textParts, part.Text)
-			}
-		}
-
-		// If no function calls → this is the final response
-		if len(functionCalls) == 0 {
-			finalText := strings.Join(textParts, "\n")
-			if finalText == "" {
-				finalText = "El sensei no tiene respuesta para eso. ¿Querés reformular la pregunta?"
+			for _, part := range parts {
+				if part.FunctionCall != nil {
+					functionCalls = append(functionCalls, *part.FunctionCall)
+				}
+				if part.Text != "" {
+					textParts = append(textParts, part.Text)
+				}
 			}
 
-			// Append sensei response to session
-			session.Messages = append(session.Messages, chatstore.ChatMessage{
-				Role:    "sensei",
-				Content: finalText,
-				Time:    time.Now(),
-			})
+			// If no function calls → this is the final response
+			if len(functionCalls) == 0 {
+				finalText := strings.Join(textParts, "\n")
+				if finalText == "" {
+					finalText = "El sensei no tiene respuesta para eso. ¿Querés reformular la pregunta?"
+				}
 
-			statusCh <- "done:" + finalText
-			return
-		}
+				// Append sensei response to session
+				session.Messages = append(session.Messages, chatstore.ChatMessage{
+					Role:    "sensei",
+					Content: finalText,
+					Time:    time.Now(),
+				})
 
-		// Execute each function call and build functionResponse messages
-		for _, fc := range functionCalls {
+				statusCh <- metrics.statusLine()
+				statusCh <- "done:" + finalText
+				return
+			}
+
+			fc := functionCalls[0]
 			statusCh <- fmt.Sprintf("Ejecutando %s...", fc.Name)
+			metrics.toolCalls++
 
 			// Execute the tool
 			result, toolErr := s.tools.Execute(fc.Name, fc.Args)
@@ -175,17 +211,41 @@ func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, s
 				Time:    time.Now(),
 			})
 
-			// Append the functionResponse as a user message
+			// Append the functionResponse as a user message for local session persistence.
 			session.Messages = append(session.Messages, chatstore.ChatMessage{
 				Role:    "user",
 				Content: fmt.Sprintf("[functionResponse: %s -> %v]", fc.Name, responsePayload),
 				Time:    time.Now(),
 			})
+
+			if metrics.rounds >= maxAgentRounds {
+				statusCh <- metrics.statusLine()
+				statusCh <- "done:Lo siento, tardé mucho. reformulá la pregunta."
+				return
+			}
+
+			statusCh <- "Pensando..."
+			metrics.rounds++
+			metrics.providerCalls++
+			parts, err = s.provider.SendFunctionResponse(ctx, session.Messages, fc.ID, fc.Name, responsePayload)
+			if err != nil {
+				statusCh <- metrics.statusLine()
+				statusCh <- fmt.Sprintf("error:Error del sensei: %v", err)
+				return
+			}
 		}
 	}
 
 	// Max rounds exhausted
+	statusCh <- metrics.statusLine()
 	statusCh <- "done:Lo siento, tardé mucho. reformulá la pregunta."
+}
+
+func pluralizeSpanish(count int, singular string, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 // registerCreateExerciseFile registers the create_exercise_file tool.
@@ -224,6 +284,7 @@ func (s *SenseiService) registerCreateExerciseFile() {
 		if err := s.workspace.CreateFile(relativePath, content); err != nil {
 			return nil, err
 		}
+		s.setRecentWorkspaceFile(relativePath)
 
 		return map[string]interface{}{
 			"filename":   relativePath,
@@ -280,6 +341,91 @@ func (s *SenseiService) registerReadRoadmapSection() {
 	})
 }
 
+func (s *SenseiService) registerListWorkspaceFiles() {
+	s.tools.Register("list_workspace_files", domain.ToolDeclaration{
+		Name:        "list_workspace_files",
+		Description: "Lista los archivos .go que existen en el workspace del estudiante, incluyendo subcarpetas temáticas. Usala cuando el usuario pregunte qué ejercicios, archivos o lecciones tiene disponibles.",
+		Parameters: domain.ToolParameters{
+			Type:       "OBJECT",
+			Properties: map[string]domain.ToolProperty{},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		files, err := s.workspace.ListFiles()
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]interface{}{
+			"count":          len(files),
+			"files":          files,
+			"workspace_path": s.workspace.WorkspacePath(),
+			"recent_file":    s.getRecentWorkspaceFile(),
+		}, nil
+	})
+}
+
+func (s *SenseiService) registerReadWorkspaceFile() {
+	s.tools.Register("read_workspace_file", domain.ToolDeclaration{
+		Name:        "read_workspace_file",
+		Description: "Lee el contenido de un archivo .go del workspace del estudiante. Usala después de listar archivos o cuando el usuario pida revisar un ejercicio o archivo específico.",
+		Parameters: domain.ToolParameters{
+			Type: "OBJECT",
+			Properties: map[string]domain.ToolProperty{
+				"filename": {Type: "STRING", Description: "Ruta relativa del archivo .go dentro del workspace"},
+			},
+			Required: []string{"filename"},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		filename, _ := args["filename"].(string)
+		content, err := s.workspace.ReadFile(filename)
+		if err != nil {
+			return nil, err
+		}
+		s.setRecentWorkspaceFile(filename)
+
+		return map[string]interface{}{
+			"filename": filename,
+			"content":  content,
+		}, nil
+	})
+}
+
+func (s *SenseiService) registerReadRecentWorkspaceFile() {
+	s.tools.Register("read_recent_workspace_file", domain.ToolDeclaration{
+		Name:        "read_recent_workspace_file",
+		Description: "Lee el archivo .go más reciente en el que estuvieron trabajando en esta sesión. Usala cuando el usuario diga 'ya terminé', 'revisalo', o pida feedback del último ejercicio sin repetir el nombre del archivo.",
+		Parameters: domain.ToolParameters{
+			Type:       "OBJECT",
+			Properties: map[string]domain.ToolProperty{},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		filename := s.getRecentWorkspaceFile()
+		if filename == "" {
+			files, err := s.workspace.ListFiles()
+			if err != nil {
+				return nil, err
+			}
+			if len(files) == 1 {
+				filename = files[0]
+			}
+		}
+		if filename == "" {
+			return nil, fmt.Errorf("no hay un archivo reciente identificado para revisar")
+		}
+
+		content, err := s.workspace.ReadFile(filename)
+		if err != nil {
+			return nil, err
+		}
+		s.setRecentWorkspaceFile(filename)
+
+		return map[string]interface{}{
+			"filename": filename,
+			"content":  content,
+		}, nil
+	})
+}
+
 func (s *SenseiService) setCurrentTopicSlug(slug string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -290,6 +436,18 @@ func (s *SenseiService) getCurrentTopicSlug() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.currentTopicSlug
+}
+
+func (s *SenseiService) setRecentWorkspaceFile(filename string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recentWorkspaceFile = filename
+}
+
+func (s *SenseiService) getRecentWorkspaceFile() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.recentWorkspaceFile
 }
 
 func joinTopicPath(topicSlug string, filename string) string {

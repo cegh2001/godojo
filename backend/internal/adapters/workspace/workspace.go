@@ -60,7 +60,8 @@ func (w *WorkspaceManager) ReadFile(filename string) (string, error) {
 	return string(data), nil
 }
 
-// ListFiles returns a sorted list of all .go files (relative paths) in the workspace.
+// ListFiles returns a sorted list of all .go files (relative paths) in the workspace,
+// including files stored inside topic subdirectories.
 // Creates the base directory if it does not exist.
 func (w *WorkspaceManager) ListFiles() ([]string, error) {
 	// Ensure the base directory exists
@@ -68,19 +69,27 @@ func (w *WorkspaceManager) ListFiles() ([]string, error) {
 		return nil, fmt.Errorf("no se pudo crear el workspace: %w", err)
 	}
 
-	entries, err := os.ReadDir(w.basePath)
+	var files []string
+	err := filepath.Walk(w.basePath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(info.Name(), ".go") {
+			return nil
+		}
+
+		rel, err := filepath.Rel(w.basePath, path)
+		if err != nil {
+			return fmt.Errorf("no se pudo resolver la ruta relativa de %q: %w", path, err)
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo leer el workspace: %w", err)
-	}
-
-	var files []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if strings.HasSuffix(entry.Name(), ".go") {
-			files = append(files, entry.Name())
-		}
 	}
 
 	sort.Strings(files)

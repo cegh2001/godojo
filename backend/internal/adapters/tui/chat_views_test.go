@@ -189,6 +189,19 @@ func TestViewSenseiChat_ShowsScrollStatus(t *testing.T) {
 	}
 }
 
+func TestViewSenseiChat_ShowsFinalMetricsStatus(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 80
+	m.height = 24
+	m.toolStatus = "Métricas: 1.2s · 1 ronda · 1 llamada al modelo · 0 herramientas"
+
+	view := m.View()
+	if !strings.Contains(view, "Métricas:") {
+		t.Error("chat view should show the final metrics status when available")
+	}
+}
+
 func TestViewSenseiChat_ShowsHelpBar(t *testing.T) {
 	m := newModelTest()
 	m.state = stateSenseiChat

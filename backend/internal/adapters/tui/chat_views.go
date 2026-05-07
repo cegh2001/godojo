@@ -195,6 +195,9 @@ func (m Model) renderChatStatusLine() string {
 	if maxScroll > 0 && scroll > 0 {
 		return infoStyle.Render(fmt.Sprintf("Viendo mensajes anteriores (%d/%d) · End: volver al final", scroll, maxScroll))
 	}
+	if m.toolStatus != "" {
+		return infoStyle.Render(m.toolStatus)
+	}
 
 	return infoStyle.Render("Enter: enviar | ↑/↓: scroll | PgUp/PgDn: salto")
 }

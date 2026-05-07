@@ -57,6 +57,7 @@ const (
 	maxChatMessageSummaryRunes = 140
 	defaultChatMaxOutputTokens = 768
 	defaultChatThinkingBudget  = 1024
+	defaultChatThinkingLevel   = "low"
 	defaultFastModel           = "gemma-4-26b-a4b-it"
 	defaultHeavyModel          = "gemma-4-31b-it"
 	defaultChatModel           = defaultHeavyModel
@@ -220,20 +221,22 @@ func buildChatRequestBodyWithConfig(systemPrompt string, history []chatstore.Cha
 		systemText = senseiSystemPrompt
 	}
 
+	generationConfig := map[string]interface{}{
+		"temperature":     0.7,
+		"maxOutputTokens": cfg.maxOutputTokens,
+	}
+	if thinkingConfig := buildThinkingConfig(cfg.model, cfg.thinkingBudget); len(thinkingConfig) > 0 {
+		generationConfig["thinkingConfig"] = thinkingConfig
+	}
+
 	body := map[string]interface{}{
 		"system_instruction": map[string]interface{}{
 			"parts": []map[string]interface{}{
 				{"text": systemText},
 			},
 		},
-		"contents": contents,
-		"generationConfig": map[string]interface{}{
-			"temperature":     0.7,
-			"maxOutputTokens": cfg.maxOutputTokens,
-			"thinkingConfig": map[string]interface{}{
-				"thinkingBudget": cfg.thinkingBudget,
-			},
-		},
+		"contents":         contents,
+		"generationConfig": generationConfig,
 	}
 
 	// Include tools only when provided (backward compatible: nil/empty means no tools)
@@ -280,6 +283,27 @@ func resolveFastModelFromEnv() string {
 
 func resolveHeavyModelFromEnv() string {
 	return envOrDefault(senseiHeavyModelEnv, defaultHeavyModel)
+}
+
+func buildThinkingConfig(model string, thinkingBudget int) map[string]interface{} {
+	normalizedModel := strings.ToLower(strings.TrimSpace(model))
+	if normalizedModel == "" {
+		normalizedModel = defaultChatModel
+	}
+
+	if strings.HasPrefix(normalizedModel, "gemma-4") {
+		return nil
+	}
+
+	if strings.HasPrefix(normalizedModel, "gemini-3") {
+		thinkingLevel := defaultChatThinkingLevel
+		if thinkingBudget == 0 {
+			thinkingLevel = "minimal"
+		}
+		return map[string]interface{}{"thinkingLevel": thinkingLevel}
+	}
+
+	return map[string]interface{}{"thinkingBudget": thinkingBudget}
 }
 
 func envOrDefault(name string, defaultValue string) string {

@@ -14,6 +14,11 @@ import (
 	"godojo/internal/core/domain"
 )
 
+const (
+	defaultHintTimeout         = 60 * time.Second
+	defaultHintMaxOutputTokens = 256
+)
+
 // GeminiClient abstracts the Gemini API call for testing and real use.
 type GeminiClient interface {
 	GenerateContent(ctx context.Context, prompt string) (string, error)
@@ -32,7 +37,7 @@ func NewHintProvider() *HintProvider {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	p := &HintProvider{
 		apiKey:  apiKey,
-		timeout: 15 * time.Second,
+		timeout: defaultHintTimeout,
 	}
 	if apiKey != "" {
 		p.client = &realGeminiClient{apiKey: apiKey, model: resolveFastModelFromEnv()}
@@ -45,7 +50,7 @@ func NewHintProviderWithClient(apiKey string, client GeminiClient) *HintProvider
 	return &HintProvider{
 		apiKey:  apiKey,
 		client:  client,
-		timeout: 15 * time.Second,
+		timeout: defaultHintTimeout,
 	}
 }
 
@@ -146,7 +151,7 @@ type realGeminiClient struct {
 
 func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (string, error) {
 	if c.httpClient == nil {
-		c.httpClient = &http.Client{Timeout: 15 * time.Second}
+		c.httpClient = &http.Client{Timeout: defaultHintTimeout}
 	}
 
 	// Gemini API endpoint — uses the fast Gemma 4 model for lightweight hints
@@ -174,7 +179,7 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 		},
 		"generationConfig": map[string]interface{}{
 			"temperature":     0.7,
-			"maxOutputTokens": 800,
+			"maxOutputTokens": defaultHintMaxOutputTokens,
 		},
 	}
 

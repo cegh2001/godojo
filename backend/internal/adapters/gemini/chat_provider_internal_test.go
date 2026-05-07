@@ -32,13 +32,8 @@ func TestBuildChatRequestBody_UsesFastDefaults(t *testing.T) {
 		t.Fatalf("generationConfig should be a map, got %T", body["generationConfig"])
 	}
 
-	// thinkingConfig SHOULD be present inside generationConfig
-	tc, ok := generationConfig["thinkingConfig"].(map[string]interface{})
-	if !ok {
-		t.Fatal("generationConfig.thinkingConfig should be present")
-	}
-	if budget, ok := tc["thinkingBudget"]; !ok || budget != defaultChatThinkingBudget {
-		t.Fatalf("thinkingBudget should be %d, got %v", defaultChatThinkingBudget, budget)
+	if _, ok := generationConfig["thinkingConfig"]; ok {
+		t.Fatal("Gemma 4 generateContent requests should omit thinkingConfig by default")
 	}
 	if tokens, ok := generationConfig["maxOutputTokens"]; !ok || tokens != defaultChatMaxOutputTokens {
 		t.Fatalf("maxOutputTokens should be %d, got %v", defaultChatMaxOutputTokens, tokens)
@@ -227,7 +222,7 @@ func TestBuildChatRequestBody_ExcludesToolsWhenNil(t *testing.T) {
 	}
 }
 
-func TestBuildChatRequestBody_IncludesThinkingConfig(t *testing.T) {
+func TestBuildChatRequestBody_OmitsThinkingConfigForGemma4(t *testing.T) {
 	body := buildChatRequestBody("prompt", nil, nil)
 
 	genConfig, ok := body["generationConfig"].(map[string]interface{})
@@ -235,13 +230,16 @@ func TestBuildChatRequestBody_IncludesThinkingConfig(t *testing.T) {
 		t.Fatalf("generationConfig missing or wrong type: %T", body["generationConfig"])
 	}
 
-	tc, ok := genConfig["thinkingConfig"].(map[string]interface{})
-	if !ok {
-		t.Fatal("generationConfig.thinkingConfig should be present")
+	if _, ok := genConfig["thinkingConfig"]; ok {
+		t.Fatal("Gemma 4 generateContent requests should omit thinkingConfig")
 	}
-	budget, ok := tc["thinkingBudget"]
-	if !ok || budget != defaultChatThinkingBudget {
-		t.Fatalf("thinkingBudget should be %d, got %v", defaultChatThinkingBudget, budget)
+}
+
+func TestBuildThinkingConfig_OmitsConfigForGemma4(t *testing.T) {
+	config := buildThinkingConfig(defaultHeavyModel, 0)
+
+	if len(config) != 0 {
+		t.Fatalf("config = %#v, want empty map for Gemma 4", config)
 	}
 }
 

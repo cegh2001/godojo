@@ -405,11 +405,11 @@ func TestFormatGeminiAPIError(t *testing.T) {
 
 func TestChatProvider_DoGenerateContentRequest_RetriesRetryableStatuses(t *testing.T) {
 	tests := []struct {
-		name          string
-		statuses      []int
-		wantAttempts  int32
-		wantStatus    int
-		wantBodyPart  string
+		name         string
+		statuses     []int
+		wantAttempts int32
+		wantStatus   int
+		wantBodyPart string
 	}{
 		{
 			name:         "retries once on internal error",

@@ -5,7 +5,6 @@ import (
 
 	"godojo/internal/adapters/chatstore"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

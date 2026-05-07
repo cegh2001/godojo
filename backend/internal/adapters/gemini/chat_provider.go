@@ -20,8 +20,8 @@ import (
 // Uses system_instruction for persona and contents for conversation history.
 // See: https://ai.google.dev/gemini-api/docs/system-instructions
 type ChatProvider struct {
-	apiKey  string
-	timeout time.Duration
+	apiKey     string
+	timeout    time.Duration
 	httpClient *http.Client
 }
 

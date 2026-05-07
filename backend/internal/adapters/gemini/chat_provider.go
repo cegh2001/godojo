@@ -60,6 +60,9 @@ const (
 	defaultFastModel           = "gemma-4-26b-a4b-it"
 	defaultHeavyModel          = "gemma-4-31b-it"
 	defaultChatModel           = defaultHeavyModel
+	senseiModelEnv             = "GODOJO_SENSEI_MODEL"
+	senseiFastModelEnv         = "GODOJO_SENSEI_FAST_MODEL"
+	senseiHeavyModelEnv        = "GODOJO_SENSEI_HEAVY_MODEL"
 	geminiMaxAttempts          = 3
 	geminiBaseRetryDelay       = 250 * time.Millisecond
 	geminiMaxRetryDelay        = 2 * time.Second
@@ -260,11 +263,23 @@ func defaultChatRequestConfig() chatRequestConfig {
 
 func loadChatRequestConfigFromEnv() chatRequestConfig {
 	cfg := defaultChatRequestConfig()
-	cfg.model = envOrDefault("GODOJO_SENSEI_MODEL", cfg.model)
+	cfg.model = resolveChatModelFromEnv()
 	cfg.maxOutputTokens = envIntOrDefault("GODOJO_SENSEI_MAX_OUTPUT_TOKENS", cfg.maxOutputTokens)
 	cfg.thinkingBudget = envIntOrDefault("GODOJO_SENSEI_THINKING_BUDGET", cfg.thinkingBudget)
 	cfg.enableGoogleSearch = envBoolOrDefault("GODOJO_SENSEI_ENABLE_GOOGLE_SEARCH", cfg.enableGoogleSearch)
 	return cfg
+}
+
+func resolveChatModelFromEnv() string {
+	return envOrDefault(senseiModelEnv, resolveHeavyModelFromEnv())
+}
+
+func resolveFastModelFromEnv() string {
+	return envOrDefault(senseiFastModelEnv, defaultFastModel)
+}
+
+func resolveHeavyModelFromEnv() string {
+	return envOrDefault(senseiHeavyModelEnv, defaultHeavyModel)
 }
 
 func envOrDefault(name string, defaultValue string) string {

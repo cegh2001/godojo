@@ -35,7 +35,7 @@ func NewHintProvider() *HintProvider {
 		timeout: 15 * time.Second,
 	}
 	if apiKey != "" {
-		p.client = &realGeminiClient{apiKey: apiKey}
+		p.client = &realGeminiClient{apiKey: apiKey, model: resolveFastModelFromEnv()}
 	}
 	return p
 }
@@ -140,6 +140,7 @@ func buildSocraticPrompt(exercise *domain.Exercise, testOutput string) string {
 // realGeminiClient implements GeminiClient using direct HTTP calls to the Gemini API.
 type realGeminiClient struct {
 	apiKey     string
+	model      string
 	httpClient *http.Client
 }
 
@@ -149,7 +150,10 @@ func (c *realGeminiClient) GenerateContent(ctx context.Context, prompt string) (
 	}
 
 	// Gemini API endpoint — uses the fast Gemma 4 model for lightweight hints
-	model := defaultFastModel
+	model := c.model
+	if strings.TrimSpace(model) == "" {
+		model = resolveFastModelFromEnv()
+	}
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		model, c.apiKey,

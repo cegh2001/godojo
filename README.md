@@ -1,7 +1,7 @@
 # GoDojo 🥋
 
 Plataforma interactiva de terminal (TUI) para aprender Go desde cero, combinando
-TDD estricto con mentoría de IA (sensei Gemini) en un entorno 100% offline-first.
+TDD estricto con mentoría de IA (sensei Gemma 4 vía Gemini API) en un entorno 100% offline-first.
 
 ## Filosofía
 
@@ -13,7 +13,7 @@ El flujo de aprendizaje replica un coding dojo real:
 2. **Leé el ejercicio** con el esqueleto de código
 3. **Implementá tu solución** — los tests ya están escritos (TDD inverso)
 4. **Ejecutá los tests** desde la TUI (`Ctrl+T`)
-5. **Si fallan**, pedí una pista al sensei Gemini (`Ctrl+H`)
+5. **Si fallan**, pedí una pista al sensei Gemma 4 (`Ctrl+H`)
 6. **Si pasan**, ¡avanzá al siguiente tema!
 
 ## Roadmap de Aprendizaje
@@ -119,6 +119,10 @@ mi-proyecto/
 - **Go 1.21+** (requerido para `embed` y `go test -json`)
 - **API Key de Gemini** (opcional — la app funciona sin ella, solo que sin pistas del sensei)
   - Configurá `GEMINI_API_KEY` como variable de entorno o en `.env`
+  - Modelos Gemma 4 configurables por env:
+    - `GODOJO_SENSEI_FAST_MODEL=gemma-4-26b-a4b-it` para hints rápidos
+    - `GODOJO_SENSEI_HEAVY_MODEL=gemma-4-31b-it` para chat y tareas más pesadas
+    - `GODOJO_SENSEI_MODEL=...` si querés sobreescribir solo la ruta de chat
 
 ## Cómo Ejecutar
 
@@ -135,6 +139,9 @@ go vet ./...
 
 # Ejecutar la TUI
 go run ./cmd/godojo
+
+# Forzar Gemma 4 por env
+GODOJO_SENSEI_FAST_MODEL=gemma-4-26b-a4b-it GODOJO_SENSEI_HEAVY_MODEL=gemma-4-31b-it go run ./cmd/godojo
 
 # Build para producción
 go build -o godojo ./cmd/godojo
@@ -170,6 +177,9 @@ cd backend
 go test ./... -count=1   # Ejecutar todos los tests
 go test ./... -cover     # Con cobertura
 go vet ./...             # Análisis estático
+
+# Smoke tests live contra la API real (requiere GEMINI_API_KEY)
+GODOJO_GEMINI_LIVE_TEST=1 go test ./internal/adapters/gemini -run Live -count=1
 ```
 
 ## Cómo Contribuir

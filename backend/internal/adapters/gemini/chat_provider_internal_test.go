@@ -327,6 +327,34 @@ func TestLoadChatRequestConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadChatRequestConfigFromEnv_UsesHeavyModelEnvFallback(t *testing.T) {
+	t.Setenv(senseiModelEnv, "")
+	t.Setenv(senseiHeavyModelEnv, defaultHeavyModel)
+
+	cfg := loadChatRequestConfigFromEnv()
+
+	if cfg.model != defaultHeavyModel {
+		t.Fatalf("model = %q, want %q", cfg.model, defaultHeavyModel)
+	}
+}
+
+func TestResolveChatModelFromEnv_PrefersExplicitChatOverride(t *testing.T) {
+	t.Setenv(senseiHeavyModelEnv, defaultHeavyModel)
+	t.Setenv(senseiModelEnv, defaultFastModel)
+
+	if model := resolveChatModelFromEnv(); model != defaultFastModel {
+		t.Fatalf("model = %q, want %q", model, defaultFastModel)
+	}
+}
+
+func TestResolveFastModelFromEnv_UsesOverride(t *testing.T) {
+	t.Setenv(senseiFastModelEnv, defaultHeavyModel)
+
+	if model := resolveFastModelFromEnv(); model != defaultHeavyModel {
+		t.Fatalf("model = %q, want %q", model, defaultHeavyModel)
+	}
+}
+
 func TestExtractContentParts_TextOnly(t *testing.T) {
 	parts := []map[string]interface{}{
 		{"text": "Hola, ¿cómo estás?"},

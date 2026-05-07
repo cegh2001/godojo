@@ -54,8 +54,16 @@ func firstFunctionCall(parts []domain.ContentPart) *domain.FunctionCall {
 	return nil
 }
 
+func configureGemma4LiveEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("GODOJO_SENSEI_MODEL", "")
+	t.Setenv("GODOJO_SENSEI_FAST_MODEL", "gemma-4-26b-a4b-it")
+	t.Setenv("GODOJO_SENSEI_HEAVY_MODEL", "gemma-4-31b-it")
+}
+
 func TestChatProvider_LiveTextSmoke(t *testing.T) {
 	requireLiveGemini(t)
+	configureGemma4LiveEnv(t)
 
 	provider := gemini.NewChatProvider()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -80,6 +88,7 @@ func TestChatProvider_LiveTextSmoke(t *testing.T) {
 
 func TestChatProvider_LiveInteractionsSmoke(t *testing.T) {
 	requireLiveGemini(t)
+	configureGemma4LiveEnv(t)
 
 	provider := gemini.NewChatProvider()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

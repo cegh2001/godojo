@@ -27,7 +27,7 @@ func main() {
 	if os.Getenv("GEMINI_API_KEY") != "" {
 		fmt.Fprintf(os.Stderr, "🔑 Gemini API key cargada del .env\n")
 	} else {
-		fmt.Fprintf(os.Stderr, "⚠️  GEMINI_API_KEY no encontrada. Las pistas del sensei no estarán disponibles.\n")
+		fmt.Fprintf(os.Stderr, "⚠️  GEMINI_API_KEY no encontrada. El sensei no estará disponible.\n")
 		fmt.Fprintf(os.Stderr, "   Crea un archivo .env en la raíz del proyecto con: GEMINI_API_KEY=tu-key\n")
 	}
 
@@ -54,8 +54,6 @@ func main() {
 	roadmapSvc := services.NewRoadmapService()
 	exerciseSvc := services.NewExerciseService(exerciseRepo)
 	progressSvc := services.NewProgressService(progressStore)
-	hintProvider := gemini.NewHintProvider()
-	hintSvc := services.NewHintService(hintProvider)
 
 	// 4. Create SenseiService (agentic AI loop)
 	toolRegistry := core.NewToolRegistry()
@@ -75,7 +73,6 @@ Cuando generes el contenido de un ejercicio, preferí un scaffold con pistas den
 	// Suppress unused variable warnings for services still wired but unused in TUI
 	_ = exerciseSvc
 	_ = progressSvc
-	_ = hintSvc
 
 	// 6. Run Bubbletea
 	p := tea.NewProgram(model, tea.WithAltScreen())

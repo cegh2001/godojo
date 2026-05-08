@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -52,7 +50,7 @@ func TestIntegration_QuitCommands(t *testing.T) {
 
 // TestIntegration_ProgressUpdates verifies progress tracking integration.
 func TestIntegration_ProgressUpdates(t *testing.T) {
-	_, _, progressSvc, _ := setupIntegrationServices(t)
+	_, _, progressSvc := setupIntegrationServices(t)
 
 	err := progressSvc.MarkStarted("hola-mundo")
 	if err != nil {
@@ -86,7 +84,7 @@ func TestIntegration_ProgressUpdates(t *testing.T) {
 
 // TestIntegration_ExerciseService_LoadsExercises tests ExerciseService with real repo.
 func TestIntegration_ExerciseService_LoadsExercises(t *testing.T) {
-	_, exerciseSvc, _, _ := setupIntegrationServices(t)
+	_, exerciseSvc, _ := setupIntegrationServices(t)
 
 	topics := []string{"variables", "tipos", "funciones", "packages", "control-de-flujo"}
 	for _, topic := range topics {
@@ -108,7 +106,7 @@ func TestIntegration_ExerciseService_LoadsExercises(t *testing.T) {
 
 // TestIntegration_Roadmap_HasSevenPhases verifies roadmap structure.
 func TestIntegration_Roadmap_HasSevenPhases(t *testing.T) {
-	roadmapSvc, _, _, _ := setupIntegrationServices(t)
+	roadmapSvc, _, _ := setupIntegrationServices(t)
 
 	rm, err := roadmapSvc.GetRoadmap()
 	if err != nil {
@@ -144,28 +142,8 @@ func TestIntegration_AllTopicsHaveExercises(t *testing.T) {
 	}
 }
 
-// mockHintProviderIntegration implements ports.HintProvider for integration tests.
-type mockHintProviderIntegration struct {
-	available bool
-}
-
-func (m *mockHintProviderIntegration) GetHint(ctx context.Context, exercise *domain.Exercise, testOutput string) (<-chan *domain.Hint, <-chan error) {
-	errCh := make(chan error, 1)
-	hintCh := make(chan *domain.Hint, 1)
-
-	if !m.available {
-		errCh <- fmt.Errorf("hints unavailable")
-	} else {
-		hintCh <- &domain.Hint{Content: "pista de integración"}
-	}
-	close(hintCh)
-	close(errCh)
-
-	return hintCh, errCh
-}
-
 // setupIntegrationServices creates real services for integration testing.
-func setupIntegrationServices(t *testing.T) (roadmapSvc *services.RoadmapService, exerciseSvc *services.ExerciseService, progressSvc *services.ProgressService, hintSvc *services.HintService) {
+func setupIntegrationServices(t *testing.T) (roadmapSvc *services.RoadmapService, exerciseSvc *services.ExerciseService, progressSvc *services.ProgressService) {
 	t.Helper()
 
 	exerciseRepo := repository.NewEmbedExerciseRepo()
@@ -175,9 +153,6 @@ func setupIntegrationServices(t *testing.T) (roadmapSvc *services.RoadmapService
 	roadmapSvc = services.NewRoadmapService()
 	exerciseSvc = services.NewExerciseService(exerciseRepo)
 	progressSvc = services.NewProgressService(progressStore)
-
-	mockHintProvider := &mockHintProviderIntegration{available: false}
-	hintSvc = services.NewHintService(mockHintProvider)
 
 	return
 }

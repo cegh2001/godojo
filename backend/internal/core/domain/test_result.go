@@ -1,5 +1,3 @@
-// Deprecated: TestResult will be removed in sensei-first v2.
-// Replaced by Gemma's CodeExecution tool output (Phase 2).
 package domain
 
 import (
@@ -8,6 +6,7 @@ import (
 )
 
 // TestResult is a value object capturing test execution results.
+// Migration note: the long-term direction is Gemma's CodeExecution tool output.
 type TestResult struct {
 	Passed   bool
 	Output   string

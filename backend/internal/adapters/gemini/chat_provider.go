@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -32,6 +34,7 @@ type ChatProvider struct {
 
 type chatRequestConfig struct {
 	model              string
+	textModel          string
 	maxOutputTokens    int
 	thinkingBudget     int
 	enableGoogleSearch bool
@@ -61,9 +64,13 @@ const (
 	defaultFastModel           = "gemma-4-26b-a4b-it"
 	defaultHeavyModel          = "gemma-4-31b-it"
 	defaultChatModel           = defaultHeavyModel
+	defaultSenseiTimeout       = 30 * time.Second
+	defaultSenseiToolTimeout   = 60 * time.Second
 	senseiModelEnv             = "GODOJO_SENSEI_MODEL"
 	senseiFastModelEnv         = "GODOJO_SENSEI_FAST_MODEL"
 	senseiHeavyModelEnv        = "GODOJO_SENSEI_HEAVY_MODEL"
+	senseiTimeoutEnv           = "GODOJO_SENSEI_TIMEOUT_SECONDS"
+	senseiToolTimeoutEnv       = "GODOJO_SENSEI_TOOL_TIMEOUT_SECONDS"
 	geminiMaxAttempts          = 3
 	geminiBaseRetryDelay       = 250 * time.Millisecond
 	geminiMaxRetryDelay        = 2 * time.Second
@@ -71,10 +78,11 @@ const (
 
 // NewChatProvider creates a ChatProvider using the GEMINI_API_KEY environment variable.
 func NewChatProvider() *ChatProvider {
+	timeout, toolTimeout := loadSenseiTimeoutsFromEnv()
 	return &ChatProvider{
 		apiKey:        os.Getenv("GEMINI_API_KEY"),
-		timeout:       20 * time.Second,
-		toolTimeout:   45 * time.Second,
+		timeout:       timeout,
+		toolTimeout:   toolTimeout,
 		requestConfig: loadChatRequestConfigFromEnv(),
 		callContexts:  make(map[string]interactionContext),
 	}
@@ -123,17 +131,18 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 		return p.sendInteractionMessage(ctx, effectiveTimeout, systemPrompt, history, tools)
 	}
 
-	model := p.requestConfig.model
+	requestConfig := p.requestConfig.forTextRequest()
+	model := requestConfig.model
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
 		model,
 	)
 
-	body := buildChatRequestBodyWithConfig(systemPrompt, history, tools, p.requestConfig)
+	body := buildChatRequestBodyWithConfig(systemPrompt, history, tools, requestConfig)
 
 	respBody, statusCode, err := p.doGenerateContentRequest(ctx, effectiveTimeout, url, body)
 	if err != nil {
-		return []domain.ContentPart{{Text: fmt.Sprintf("Error de conexión con el sensei: %v. ¿Revisaste tu conexión a internet?", err)}}, nil
+		return []domain.ContentPart{{Text: formatGeminiTransportError(err)}}, nil
 	}
 
 	if statusCode != http.StatusOK {
@@ -258,6 +267,7 @@ func buildChatRequestBodyWithConfig(systemPrompt string, history []chatstore.Cha
 func defaultChatRequestConfig() chatRequestConfig {
 	return chatRequestConfig{
 		model:              defaultChatModel,
+		textModel:          defaultFastModel,
 		maxOutputTokens:    defaultChatMaxOutputTokens,
 		thinkingBudget:     defaultChatThinkingBudget,
 		enableGoogleSearch: false,
@@ -267,18 +277,36 @@ func defaultChatRequestConfig() chatRequestConfig {
 func loadChatRequestConfigFromEnv() chatRequestConfig {
 	cfg := defaultChatRequestConfig()
 	cfg.model = resolveChatModelFromEnv()
+	cfg.textModel = resolveFastModelFromEnv()
 	cfg.maxOutputTokens = envIntOrDefault("GODOJO_SENSEI_MAX_OUTPUT_TOKENS", cfg.maxOutputTokens)
 	cfg.thinkingBudget = envIntOrDefault("GODOJO_SENSEI_THINKING_BUDGET", cfg.thinkingBudget)
 	cfg.enableGoogleSearch = envBoolOrDefault("GODOJO_SENSEI_ENABLE_GOOGLE_SEARCH", cfg.enableGoogleSearch)
 	return cfg
 }
 
-func resolveChatModelFromEnv() string {
-	return envOrDefault(senseiModelEnv, resolveHeavyModelFromEnv())
+func loadSenseiTimeoutsFromEnv() (time.Duration, time.Duration) {
+	timeout := envDurationSecondsOrDefault(senseiTimeoutEnv, defaultSenseiTimeout)
+	toolTimeout := envDurationSecondsOrDefault(senseiToolTimeoutEnv, defaultSenseiToolTimeout)
+	if toolTimeout < timeout {
+		toolTimeout = timeout
+	}
+	return timeout, toolTimeout
+}
+
+func (cfg chatRequestConfig) forTextRequest() chatRequestConfig {
+	requestCfg := cfg
+	if strings.TrimSpace(requestCfg.textModel) != "" {
+		requestCfg.model = requestCfg.textModel
+	}
+	return requestCfg
 }
 
 func resolveFastModelFromEnv() string {
 	return envOrDefault(senseiFastModelEnv, defaultFastModel)
+}
+
+func resolveChatModelFromEnv() string {
+	return envOrDefault(senseiModelEnv, resolveHeavyModelFromEnv())
 }
 
 func resolveHeavyModelFromEnv() string {
@@ -323,6 +351,18 @@ func envIntOrDefault(name string, defaultValue int) int {
 		return defaultValue
 	}
 	return parsed
+}
+
+func envDurationSecondsOrDefault(name string, defaultValue time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return defaultValue
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil || seconds <= 0 {
+		return defaultValue
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func envBoolOrDefault(name string, defaultValue bool) bool {
@@ -589,6 +629,19 @@ func minDuration(a time.Duration, b time.Duration) time.Duration {
 	return b
 }
 
+func formatGeminiTransportError(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "El sensei tardó demasiado en responder. Probá de nuevo en unos segundos."
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "El sensei tardó demasiado en responder. Probá de nuevo en unos segundos."
+	}
+
+	return fmt.Sprintf("Error de conexión con el sensei: %v. ¿Revisaste tu conexión a internet?", err)
+}
+
 // extractContentParts extracts content parts from the Gemini API response.
 // Parses both text and functionCall keys, skipping thought parts.
 func extractContentParts(parts []map[string]interface{}) []domain.ContentPart {
@@ -794,7 +847,7 @@ func (p *ChatProvider) SendFunctionResponse(ctx context.Context, history []chats
 
 	respBody, statusCode, err := p.doGenerateContentRequest(ctx, p.timeout, url, body)
 	if err != nil {
-		return []domain.ContentPart{{Text: fmt.Sprintf("Error de conexión con el sensei: %v. ¿Revisaste tu conexión a internet?", err)}}, nil
+		return []domain.ContentPart{{Text: formatGeminiTransportError(err)}}, nil
 	}
 
 	if statusCode != http.StatusOK {
@@ -817,7 +870,7 @@ func (p *ChatProvider) sendInteractionMessage(ctx context.Context, timeout time.
 	url := "https://generativelanguage.googleapis.com/v1beta/interactions"
 	respBody, statusCode, err := p.doInteractionsRequest(ctx, timeout, url, body)
 	if err != nil {
-		return []domain.ContentPart{{Text: fmt.Sprintf("Error de conexión con el sensei: %v. ¿Revisaste tu conexión a internet?", err)}}, nil
+		return []domain.ContentPart{{Text: formatGeminiTransportError(err)}}, nil
 	}
 	if statusCode != http.StatusOK {
 		return []domain.ContentPart{{Text: formatGeminiAPIError(statusCode, respBody)}}, nil
@@ -848,7 +901,7 @@ func (p *ChatProvider) sendInteractionFunctionResult(ctx context.Context, callID
 	url := "https://generativelanguage.googleapis.com/v1beta/interactions"
 	respBody, statusCode, err := p.doInteractionsRequest(ctx, p.toolTimeout, url, body)
 	if err != nil {
-		return []domain.ContentPart{{Text: fmt.Sprintf("Error de conexión con el sensei: %v. ¿Revisaste tu conexión a internet?", err)}}, nil
+		return []domain.ContentPart{{Text: formatGeminiTransportError(err)}}, nil
 	}
 	if statusCode != http.StatusOK {
 		return []domain.ContentPart{{Text: formatGeminiAPIError(statusCode, respBody)}}, nil

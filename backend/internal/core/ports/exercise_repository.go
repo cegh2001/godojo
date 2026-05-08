@@ -6,8 +6,8 @@ import (
 	"godojo/internal/core/domain"
 )
 
-// Deprecated: ExerciseRepository will be removed in sensei-first v2.
-// Replaced by SenseiService + WorkspaceManager + Gemma-generated files.
+// ExerciseRepository defines the current exercise storage contract.
+// Migration note: the long-term direction is SenseiService + WorkspaceManager + Gemma-generated files.
 type ExerciseRepository interface {
 	// GetBySlug retrieves a single exercise by its slug within a topic.
 	GetBySlug(ctx context.Context, topicSlug, exerciseSlug string) (*domain.Exercise, error)

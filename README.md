@@ -13,7 +13,7 @@ El flujo de aprendizaje replica un coding dojo real:
 2. **Leé el ejercicio** con el esqueleto de código
 3. **Implementá tu solución** — los tests ya están escritos (TDD inverso)
 4. **Ejecutá los tests** desde la TUI (`Ctrl+T`)
-5. **Si fallan**, pedí una pista al sensei Gemma 4 (`Ctrl+H`)
+5. **Si te trabás**, consultá al sensei Gemma 4 desde el chat
 6. **Si pasan**, ¡avanzá al siguiente tema!
 
 ## Roadmap de Aprendizaje
@@ -40,10 +40,10 @@ El flujo de aprendizaje replica un coding dojo real:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    TUI (Bubbletea)                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
-│  │ Roadmap  │  │  Topic   │  │ Exercise │  │  Hints  │ │
-│  │  View    │→ │  Detail  │→ │   View   │→ │  View   │ │
-│  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐  │
+│  │ Roadmap  │  │  Topic   │  │  Sensei Chat / TUI   │  │
+│  │  View    │→ │  Detail  │→ │  agentic tutoring    │  │
+│  └──────────┘  └──────────┘  └──────────────────────┘  │
 │       ↑                          ↓                      │
 │       └──────── Esc ─────────────┘                      │
 ├─────────────────────────────────────────────────────────┤
@@ -52,12 +52,11 @@ El flujo de aprendizaje replica un coding dojo real:
 │  │ RoadmapService │  │ExerciseService │                 │
 │  └────────────────┘  └────────────────┘                 │
 │  ┌────────────────┐  ┌────────────────┐                 │
-│  │ ProgressService│  │  HintService   │                 │
+│  │ ProgressService│  │ SenseiService  │                 │
 │  └────────────────┘  └────────────────┘                 │
 ├─────────────────────────────────────────────────────────┤
 │              Ports (Interfaces)                          │
-│  ExerciseRepository │ ProgressStore │ TestRunner │        │
-│                    HintProvider                          │
+│  ExerciseRepository │ ProgressStore │ TestRunner │ SenseiProvider │
 ├─────────────────────────────────────────────────────────┤
 │              Adapters (Implementations)                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
@@ -65,11 +64,11 @@ El flujo de aprendizaje replica un coding dojo real:
 │  │    Repo      │  │    Store     │  │ (os/exec)     │  │
 │  └──────────────┘  └──────────────┘  └───────────────┘  │
 │  ┌──────────────────────────────┐                       │
-│  │  Gemini Hint Provider (genai)│                       │
+│  │   Gemini Chat Provider       │                       │
 │  └──────────────────────────────┘                       │
 ├─────────────────────────────────────────────────────────┤
 │              Domain (Entities)                           │
-│  Roadmap │ Phase │ Topic │ Exercise │ Progress │ Hint    │
+│  Roadmap │ Phase │ Topic │ Exercise │ Progress │ ToolCall │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -82,7 +81,7 @@ El flujo de aprendizaje replica un coding dojo real:
 | TUI | Bubbletea + Lipgloss | El estándar de facto para TUIs en Go. Modelo Elm-like. |
 | Tests | `go test -json` via `os/exec` | Output estructurado, deterministic, machine-parseable. |
 | Embedding | `embed.FS` | Binario único, sin dependencias de sistema de archivos. |
-| Gemini | Async goroutine + channels | TUI nunca se bloquea. Degradación graceful sin API key. |
+| Gemini | Chat provider agentic + tool loop | Conversación y tutoría desde una sola ruta activa, sin wiring legacy duplicado. |
 | Español | Rioplatense (voseo) | Target audience: hispanohablantes. Lenguaje cálido y cercano. |
 
 ## Estructura del Proyecto
@@ -100,15 +99,15 @@ mi-proyecto/
 │   └── internal/
 │       ├── core/
 │       │   ├── domain/             # Entidades: Roadmap, Exercise, Progress…
-│       │   ├── ports/              # Interfaces: ExerciseRepository, HintProvider…
-│       │   └── services/           # Lógica de negocio: RoadmapService, HintService…
+│       │   ├── ports/              # Interfaces: ExerciseRepository, SenseiProvider…
+│       │   └── services/           # Lógica de negocio: RoadmapService, SenseiService…
 │       └── adapters/
 │           ├── tui/                # Bubbletea: modelo, vistas, comandos, tests
 │           ├── repository/         # EmbedExerciseRepo (embed.FS + generador)
 │           │   └── data/           # Ejercicios embebidos (Fase 1 + Fase 2)
 │           ├── runner/             # GoTestRunner (os/exec + -json parser)
 │           ├── store/              # JSONProgressStore (~/.godojo/progress.json)
-│           └── gemini/             # GeminiHintProvider (genai + prompt socrático)
+│           └── gemini/             # ChatProvider para SenseiService
 └── ~/.godojo/                      # Creado en runtime — workspace del usuario
     ├── progress.json               # Progreso del usuario (JSON)
     └── exercises/                  # Archivos generados por ejercicio
@@ -117,12 +116,12 @@ mi-proyecto/
 ## Requisitos
 
 - **Go 1.21+** (requerido para `embed` y `go test -json`)
-- **API Key de Gemini** (opcional — la app funciona sin ella, solo que sin pistas del sensei)
+- **API Key de Gemini** (opcional — la app funciona sin ella, solo que sin el sensei)
   - Configurá `GEMINI_API_KEY` como variable de entorno o en `.env`
   - Modelos Gemma 4 configurables por env:
-    - `GODOJO_SENSEI_FAST_MODEL=gemma-4-26b-a4b-it` para hints rápidos
-    - `GODOJO_SENSEI_HEAVY_MODEL=gemma-4-31b-it` para chat y tareas más pesadas
-    - `GODOJO_SENSEI_MODEL=...` si querés sobreescribir solo la ruta de chat
+    - `GODOJO_SENSEI_FAST_MODEL=gemma-4-26b-a4b-it` para respuestas conversacionales sin tools
+    - `GODOJO_SENSEI_HEAVY_MODEL=gemma-4-31b-it` para la ruta con tools y tareas de workspace
+    - `GODOJO_SENSEI_MODEL=...` si querés sobreescribir explícitamente la ruta heavy/tool-enabled
 
 ## Cómo Ejecutar
 
@@ -140,7 +139,7 @@ go vet ./...
 # Ejecutar la TUI
 go run ./cmd/godojo
 
-# Forzar Gemma 4 por env
+# Forzar Gemma 4 por env en la ruta activa del sensei
 GODOJO_SENSEI_FAST_MODEL=gemma-4-26b-a4b-it GODOJO_SENSEI_HEAVY_MODEL=gemma-4-31b-it go run ./cmd/godojo
 
 # Build para producción
@@ -155,7 +154,6 @@ go build -o godojo ./cmd/godojo
 | `Enter` | Seleccionar / Entrar a detalle |
 | `Esc` | Volver atrás |
 | `Ctrl+T` | Ejecutar tests |
-| `Ctrl+H` | Pedir pista al sensei (solo si fallaron los tests) |
 | `q` o `Ctrl+C` | Salir |
 
 ## Testing

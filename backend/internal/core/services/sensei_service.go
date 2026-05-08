@@ -19,6 +19,38 @@ const (
 	statusChannelBufSize = 10
 )
 
+var senseiToolIntentHints = []string{
+	"archivo",
+	"workspace",
+	"roadmap",
+	"seccion",
+	"sección",
+	"tema",
+	"topic",
+	"ejercicio",
+	"ejercicios",
+	"crea",
+	"creá",
+	"crear",
+	"armame",
+	"armá",
+	"revisa",
+	"revisá",
+	"revisar",
+	"lee",
+	"leé",
+	"leer",
+	"lista",
+	"listá",
+	"listar",
+	"ultimo archivo",
+	"último archivo",
+	"termine",
+	"terminé",
+	"complete",
+	"completé",
+}
+
 type senseiRunMetrics struct {
 	startedAt     time.Time
 	rounds        int
@@ -102,7 +134,7 @@ func (s *SenseiService) ProcessMessage(ctx context.Context, systemPrompt string,
 
 	go func() {
 		defer close(internalCh)
-		s.runAgentLoop(ctx, systemPrompt, session, internalCh)
+		s.runAgentLoop(ctx, systemPrompt, userMessage, session, internalCh)
 	}()
 
 	// Collect statuses and final response
@@ -130,8 +162,8 @@ func (s *SenseiService) ProcessMessage(ctx context.Context, systemPrompt string,
 }
 
 // runAgentLoop executes the agent loop: send → parse → execute tools → repeat.
-func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, session *chatstore.ChatSession, statusCh chan<- string) {
-	toolDeclarations := s.tools.GetDeclarations()
+func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, userMessage string, session *chatstore.ChatSession, statusCh chan<- string) {
+	toolDeclarations := s.initialToolDeclarations(userMessage)
 	metrics := newSenseiRunMetrics()
 
 	for round := 0; round < maxAgentRounds; round++ {
@@ -239,6 +271,28 @@ func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, s
 	// Max rounds exhausted
 	statusCh <- metrics.statusLine()
 	statusCh <- "done:Lo siento, tardé mucho. reformulá la pregunta."
+}
+
+func (s *SenseiService) initialToolDeclarations(userMessage string) []domain.ToolDeclaration {
+	if !shouldStartWithTools(userMessage) {
+		return nil
+	}
+	return s.tools.GetDeclarations()
+}
+
+func shouldStartWithTools(userMessage string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(userMessage))
+	if normalized == "" {
+		return false
+	}
+
+	for _, hint := range senseiToolIntentHints {
+		if strings.Contains(normalized, hint) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func pluralizeSpanish(count int, singular string, plural string) string {

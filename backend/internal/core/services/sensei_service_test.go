@@ -27,6 +27,7 @@ type mockSenseiProvider struct {
 	responses                  [][]domain.ContentPart
 	callCount                  int
 	sendCalls                  int
+	sendToolCounts             []int
 	functionResponseCalls      int
 	lastFunctionResponseCallID string
 	lastFunctionResponseResult interface{}
@@ -50,6 +51,7 @@ func (m *mockSenseiProvider) nextResponse() ([]domain.ContentPart, error) {
 func (m *mockSenseiProvider) SendMessage(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) ([]domain.ContentPart, error) {
 	m.mu.Lock()
 	m.sendCalls++
+	m.sendToolCounts = append(m.sendToolCounts, len(tools))
 	m.mu.Unlock()
 	return m.nextResponse()
 }
@@ -172,10 +174,36 @@ func TestSenseiService_TextOnlyResponse(t *testing.T) {
 	if response != "¡Buenas! ¿En qué te ayudo con Go?" {
 		t.Errorf("response = %q, want greeting", response)
 	}
+	if len(provider.sendToolCounts) != 1 || provider.sendToolCounts[0] != 0 {
+		t.Fatalf("first SendMessage tools = %v, want [0]", provider.sendToolCounts)
+	}
 
 	// Should have "Pensando..." and "done" statuses
 	if len(statuses) < 2 {
 		t.Errorf("expected at least 2 status updates, got %d: %v", len(statuses), statuses)
+	}
+}
+
+func TestSenseiService_StartsWithToolsForWorkspaceIntent(t *testing.T) {
+	provider := &mockSenseiProvider{
+		responses: [][]domain.ContentPart{
+			{textPart("Primero voy a revisar tu workspace.")},
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+
+	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-fast-tools"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if response != "Primero voy a revisar tu workspace." {
+		t.Fatalf("response = %q", response)
+	}
+	if len(provider.sendToolCounts) != 1 || provider.sendToolCounts[0] == 0 {
+		t.Fatalf("first SendMessage tools = %v, want a tool-enabled request", provider.sendToolCounts)
 	}
 }
 

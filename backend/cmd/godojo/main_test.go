@@ -21,13 +21,11 @@ func TestWiring_NoPanic(t *testing.T) {
 	progressPath := tmpDir + "/progress.json"
 	progressStore := store.NewJSONProgressStore(progressPath)
 	exerciseRepo := repository.NewEmbedExerciseRepo()
-	hintProvider := gemini.NewHintProvider()
 
 	// 2. Create services (inject adapters)
 	roadmapSvc := services.NewRoadmapService()
 	exerciseSvc := services.NewExerciseService(exerciseRepo)
 	progressSvc := services.NewProgressService(progressStore)
-	hintSvc := services.NewHintService(hintProvider)
 
 	// Verify services are created
 	if roadmapSvc == nil {
@@ -38,9 +36,6 @@ func TestWiring_NoPanic(t *testing.T) {
 	}
 	if progressSvc == nil {
 		t.Fatal("progressSvc is nil")
-	}
-	if hintSvc == nil {
-		t.Fatal("hintSvc is nil")
 	}
 
 	// 3. Create SenseiService

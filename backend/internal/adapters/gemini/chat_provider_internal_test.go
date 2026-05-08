@@ -305,6 +305,7 @@ func TestBuildToolsJSONWithGoogleSearch_OptIn(t *testing.T) {
 
 func TestLoadChatRequestConfigFromEnv(t *testing.T) {
 	t.Setenv("GODOJO_SENSEI_MODEL", defaultHeavyModel)
+	t.Setenv(senseiFastModelEnv, defaultFastModel)
 	t.Setenv("GODOJO_SENSEI_MAX_OUTPUT_TOKENS", "512")
 	t.Setenv("GODOJO_SENSEI_THINKING_BUDGET", "0")
 	t.Setenv("GODOJO_SENSEI_ENABLE_GOOGLE_SEARCH", "true")
@@ -313,6 +314,9 @@ func TestLoadChatRequestConfigFromEnv(t *testing.T) {
 
 	if cfg.model != defaultHeavyModel {
 		t.Fatalf("model = %q", cfg.model)
+	}
+	if cfg.textModel != defaultFastModel {
+		t.Fatalf("textModel = %q", cfg.textModel)
 	}
 	if cfg.maxOutputTokens != 512 {
 		t.Fatalf("maxOutputTokens = %d", cfg.maxOutputTokens)
@@ -336,20 +340,83 @@ func TestLoadChatRequestConfigFromEnv_UsesHeavyModelEnvFallback(t *testing.T) {
 	}
 }
 
-func TestResolveChatModelFromEnv_PrefersExplicitChatOverride(t *testing.T) {
-	t.Setenv(senseiHeavyModelEnv, defaultHeavyModel)
-	t.Setenv(senseiModelEnv, defaultFastModel)
+func TestLoadChatRequestConfigFromEnv_UsesFastModelEnvFallback(t *testing.T) {
+	t.Setenv(senseiFastModelEnv, "custom-fast-model")
 
-	if model := resolveChatModelFromEnv(); model != defaultFastModel {
-		t.Fatalf("model = %q, want %q", model, defaultFastModel)
+	cfg := loadChatRequestConfigFromEnv()
+
+	if cfg.textModel != "custom-fast-model" {
+		t.Fatalf("textModel = %q, want %q", cfg.textModel, "custom-fast-model")
 	}
 }
 
-func TestResolveFastModelFromEnv_UsesOverride(t *testing.T) {
-	t.Setenv(senseiFastModelEnv, defaultHeavyModel)
+func TestResolveChatModelFromEnv_PrefersExplicitChatOverride(t *testing.T) {
+	t.Setenv(senseiHeavyModelEnv, defaultHeavyModel)
+	t.Setenv(senseiModelEnv, "custom-chat-model")
 
-	if model := resolveFastModelFromEnv(); model != defaultHeavyModel {
-		t.Fatalf("model = %q, want %q", model, defaultHeavyModel)
+	if model := resolveChatModelFromEnv(); model != "custom-chat-model" {
+		t.Fatalf("model = %q, want %q", model, "custom-chat-model")
+	}
+}
+
+func TestResolveFastModelFromEnv_PrefersExplicitFastOverride(t *testing.T) {
+	t.Setenv(senseiFastModelEnv, "custom-fast-model")
+
+	if model := resolveFastModelFromEnv(); model != "custom-fast-model" {
+		t.Fatalf("model = %q, want %q", model, "custom-fast-model")
+	}
+}
+
+func TestLoadSenseiTimeoutsFromEnv_UsesDefaults(t *testing.T) {
+	t.Setenv(senseiTimeoutEnv, "")
+	t.Setenv(senseiToolTimeoutEnv, "")
+
+	timeout, toolTimeout := loadSenseiTimeoutsFromEnv()
+
+	if timeout != defaultSenseiTimeout {
+		t.Fatalf("timeout = %s, want %s", timeout, defaultSenseiTimeout)
+	}
+	if toolTimeout != defaultSenseiToolTimeout {
+		t.Fatalf("toolTimeout = %s, want %s", toolTimeout, defaultSenseiToolTimeout)
+	}
+}
+
+func TestLoadSenseiTimeoutsFromEnv_UsesOverrides(t *testing.T) {
+	t.Setenv(senseiTimeoutEnv, "35")
+	t.Setenv(senseiToolTimeoutEnv, "75")
+
+	timeout, toolTimeout := loadSenseiTimeoutsFromEnv()
+
+	if timeout != 35*time.Second {
+		t.Fatalf("timeout = %s, want %s", timeout, 35*time.Second)
+	}
+	if toolTimeout != 75*time.Second {
+		t.Fatalf("toolTimeout = %s, want %s", toolTimeout, 75*time.Second)
+	}
+}
+
+func TestLoadSenseiTimeoutsFromEnv_KeepsToolTimeoutAtLeastTextTimeout(t *testing.T) {
+	t.Setenv(senseiTimeoutEnv, "40")
+	t.Setenv(senseiToolTimeoutEnv, "10")
+
+	timeout, toolTimeout := loadSenseiTimeoutsFromEnv()
+
+	if timeout != 40*time.Second {
+		t.Fatalf("timeout = %s, want %s", timeout, 40*time.Second)
+	}
+	if toolTimeout != 40*time.Second {
+		t.Fatalf("toolTimeout = %s, want %s", toolTimeout, 40*time.Second)
+	}
+}
+
+func TestFormatGeminiTransportError_DeadlineExceeded(t *testing.T) {
+	msg := formatGeminiTransportError(context.DeadlineExceeded)
+
+	if !strings.Contains(msg, "tardó demasiado") {
+		t.Fatalf("message = %q", msg)
+	}
+	if strings.Contains(strings.ToLower(msg), "revisaste tu conexión") {
+		t.Fatalf("message should not blame the connection: %q", msg)
 	}
 }
 
@@ -756,6 +823,53 @@ func TestChatProvider_SendMessage_UsesInteractionsForTools(t *testing.T) {
 	toolsRaw, ok := captured.Body["tools"].([]interface{})
 	if !ok || len(toolsRaw) != 1 {
 		t.Fatalf("tools = %#v", captured.Body["tools"])
+	}
+}
+
+func TestChatProvider_SendMessage_UsesFastModelWithoutTools(t *testing.T) {
+	type capturedRequest struct {
+		Path string
+		Body map[string]interface{}
+	}
+
+	var captured capturedRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		captured.Path = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&captured.Body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"respuesta rápida"}]}}]}`))
+	}))
+	defer server.Close()
+
+	provider := &ChatProvider{
+		apiKey:     "test-key",
+		timeout:    time.Second,
+		httpClient: redirectedHTTPClient(t, server.URL),
+		requestConfig: chatRequestConfig{
+			model:              defaultHeavyModel,
+			textModel:          defaultFastModel,
+			maxOutputTokens:    defaultChatMaxOutputTokens,
+			thinkingBudget:     defaultChatThinkingBudget,
+			enableGoogleSearch: false,
+		},
+		callContexts: make(map[string]interactionContext),
+	}
+
+	parts, err := provider.SendMessage(context.Background(), "Sos un sensei.", []chatstore.ChatMessage{{Role: "user", Content: "Hola", Time: time.Now()}}, nil)
+	if err != nil {
+		t.Fatalf("SendMessage error: %v", err)
+	}
+	if captured.Path != "/v1beta/models/"+defaultFastModel+":generateContent" {
+		t.Fatalf("request path = %q", captured.Path)
+	}
+	if len(parts) != 1 || parts[0].Text != "respuesta rápida" {
+		t.Fatalf("parts = %+v", parts)
+	}
+	if _, ok := captured.Body["tools"]; ok {
+		t.Fatal("text-only request should not include tools")
 	}
 }
 

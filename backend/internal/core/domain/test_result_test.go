@@ -67,6 +67,85 @@ func TestNewTestResult(t *testing.T) {
 			if tr.Duration != tt.duration {
 				t.Errorf("duration = %v, want %v", tr.Duration, tt.duration)
 			}
+			// New fields default to empty via constructor
+			if tr.Stdout != "" {
+				t.Errorf("stdout = %q, want empty", tr.Stdout)
+			}
+			if tr.Stderr != "" {
+				t.Errorf("stderr = %q, want empty", tr.Stderr)
+			}
+		})
+	}
+}
+
+func TestTestResult_StdoutStderr_StructLiteral(t *testing.T) {
+	tests := []struct {
+		name       string
+		passed     bool
+		output     string
+		stdout     string
+		stderr     string
+		duration   time.Duration
+		wantStdout string
+		wantStderr string
+	}{
+		{
+			name:       "both stdout and stderr populated",
+			passed:     true,
+			output:     "combined output",
+			stdout:     `{"Action":"pass"}`,
+			stderr:     "warning: deprecated flag",
+			duration:   100 * time.Millisecond,
+			wantStdout: `{"Action":"pass"}`,
+			wantStderr: "warning: deprecated flag",
+		},
+		{
+			name:       "stdout only, stderr empty",
+			passed:     true,
+			output:     "ok",
+			stdout:     "test output",
+			stderr:     "",
+			duration:   50 * time.Millisecond,
+			wantStdout: "test output",
+			wantStderr: "",
+		},
+		{
+			name:       "stderr only, stdout empty (compile error)",
+			passed:     false,
+			output:     "compilation failed",
+			stdout:     "",
+			stderr:     "syntax error at line 10",
+			duration:   10 * time.Millisecond,
+			wantStdout: "",
+			wantStderr: "syntax error at line 10",
+		},
+		{
+			name:       "both empty (no output)",
+			passed:     false,
+			output:     "",
+			stdout:     "",
+			stderr:     "",
+			duration:   0,
+			wantStdout: "",
+			wantStderr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := domain.TestResult{
+				Passed:   tt.passed,
+				Output:   tt.output,
+				Stdout:   tt.stdout,
+				Stderr:   tt.stderr,
+				Duration: tt.duration,
+			}
+			if tr.Stdout != tt.wantStdout {
+				t.Errorf("stdout = %q, want %q", tr.Stdout, tt.wantStdout)
+			}
+			if tr.Stderr != tt.wantStderr {
+				t.Errorf("stderr = %q, want %q", tr.Stderr, tt.wantStderr)
+			}
 		})
 	}
 }

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -45,35 +46,56 @@ func (r *GoTestRunner) Run(ctx context.Context, exerciseDir string) (*domain.Tes
 	cmd := exec.CommandContext(ctx, "go", "test", "-json", "./...")
 	cmd.Dir = exerciseDir
 
-	output, err := cmd.CombinedOutput()
+	// Separate stdout/stderr capture
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	runErr := cmd.Run()
+
+	stdoutStr := stdoutBuf.String()
+	stderrStr := stderrBuf.String()
+	combined := stdoutStr + stderrStr
 
 	// Context cancellation (timeout or explicit cancel)
 	if ctx.Err() != nil {
-		return domain.NewTestResult(false,
-			"⏱️ El test tardó demasiado tiempo y fue cancelado.\n"+string(output),
+		result, _ := domain.NewTestResult(false,
+			"⏱️ El test tardó demasiado tiempo y fue cancelado.\n"+combined,
 			r.timeout)
+		result.Stdout = stdoutStr
+		result.Stderr = stderrStr
+		return result, nil
 	}
 
 	// Infrastructure errors: directory not found, go binary not found, etc.
-	// err will be an *exec.ExitError for test failures, and *os.PathError or *exec.Error for infra issues.
-	if err != nil {
+	if runErr != nil {
 		// Check if it's an exit error (test/compile failed) vs infrastructure error
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			// Check for missing/invalid module — this is an infrastructure error
-			if strings.Contains(string(output), "cannot find main module") ||
-				strings.Contains(string(output), "go.mod file not found") ||
-				strings.Contains(string(output), "does not contain main module") ||
-				strings.Contains(string(output), "[setup failed]") {
+			if strings.Contains(combined, "cannot find main module") ||
+				strings.Contains(combined, "go.mod file not found") ||
+				strings.Contains(combined, "does not contain main module") ||
+				strings.Contains(combined, "[setup failed]") {
 				return nil, fmt.Errorf("error al ejecutar go test: no se encontró go.mod (%w)", exitErr)
 			}
 			// Non-zero exit code: test failure or compile error — parse the output
-			return r.ParseJSONOutput(string(output))
+			result, parseErr := r.ParseJSONOutput(combined)
+			if result != nil {
+				result.Stdout = stdoutStr
+				result.Stderr = stderrStr
+			}
+			return result, parseErr
 		}
 		// Infrastructure error: return as error
-		return nil, fmt.Errorf("error al ejecutar go test: %w", err)
+		return nil, fmt.Errorf("error al ejecutar go test: %w", runErr)
 	}
 
-	return r.ParseJSONOutput(string(output))
+	result, parseErr := r.ParseJSONOutput(combined)
+	if result != nil {
+		result.Stdout = stdoutStr
+		result.Stderr = stderrStr
+	}
+	return result, parseErr
 }
 
 // isCompileError detects if the output indicates a Go compilation failure rather than a test failure.

@@ -68,11 +68,15 @@ func (m *mockSenseiProvider) SendFunctionResponse(ctx context.Context, history [
 // --- Mock WorkspaceManager ---
 
 type mockWorkspace struct {
-	files map[string]string
+	files       map[string]string
+	directories map[string]bool
 }
 
 func newMockWorkspace() *mockWorkspace {
-	return &mockWorkspace{files: make(map[string]string)}
+	return &mockWorkspace{
+		files:       make(map[string]string),
+		directories: make(map[string]bool),
+	}
 }
 
 func (w *mockWorkspace) CreateFile(filename string, content string) error {
@@ -101,10 +105,359 @@ func (w *mockWorkspace) WorkspacePath() string {
 	return "/mock/workspace"
 }
 
-// Ensure mockWorkspace implements ports.WorkspaceManager
-var _ ports.WorkspaceManager = (*mockWorkspace)(nil)
+func (w *mockWorkspace) CreateDirectory(name string) error {
+	if name == "" {
+		return fmt.Errorf("el nombre del directorio no puede estar vacío")
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("no se permite usar '..' en la ruta: %q", name)
+	}
+	w.directories[name] = true
+	return nil
+}
 
-// --- Helper ---
+func (w *mockWorkspace) ListDirectory(name string) ([]ports.FileInfo, error) {
+	if !w.directories[name] && name != "." {
+		return nil, fmt.Errorf("el directorio %q no existe", name)
+	}
+	var result []ports.FileInfo
+	for fname := range w.files {
+		// Check if file is in this directory
+		dir := "."
+		if idx := strings.LastIndex(fname, "/"); idx >= 0 {
+			dir = fname[:idx]
+		}
+		if dir == name || (name == "." && !strings.Contains(fname, "/")) {
+			result = append(result, ports.FileInfo{
+				Name:  fname,
+				IsDir: false,
+				Size:  int64(len(w.files[fname])),
+			})
+		}
+	}
+	return result, nil
+}
+
+// --- Mock TestRunner ---
+
+type mockTestRunner struct {
+	results map[string]*domain.TestResult
+	errs    map[string]error
+	calls   []string
+}
+
+func newMockTestRunner() *mockTestRunner {
+	return &mockTestRunner{
+		results: make(map[string]*domain.TestResult),
+		errs:    make(map[string]error),
+	}
+}
+
+func (m *mockTestRunner) Run(ctx context.Context, exerciseDir string) (*domain.TestResult, error) {
+	m.calls = append(m.calls, exerciseDir)
+	if err, ok := m.errs[exerciseDir]; ok {
+		return nil, err
+	}
+	if result, ok := m.results[exerciseDir]; ok {
+		return result, nil
+	}
+	// Default: passing result
+	result, _ := domain.NewTestResult(true, "All tests pass", 100*time.Millisecond)
+	result.Stdout = "ok"
+	result.Stderr = ""
+	return result, nil
+}
+
+// Ensure mockTestRunner implements ports.TestRunner
+var _ ports.TestRunner = (*mockTestRunner)(nil)
+
+// ============================================================================
+// Task 7 Tests: setup_workspace, read_codebase, execute_and_evaluate
+// ============================================================================
+
+func TestSenseiService_EightToolsRegistered(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, runner)
+	_ = svc
+
+	decls := tools.GetDeclarations()
+	if len(decls) != 8 {
+		t.Fatalf("expected 8 tool declarations, got %d: %v", len(decls), toolNames(decls))
+	}
+
+	expected := map[string]bool{
+		"create_exercise_file":       true,
+		"read_roadmap_section":       true,
+		"list_workspace_files":       true,
+		"read_workspace_file":        true,
+		"read_recent_workspace_file": true,
+		"setup_workspace":            true,
+		"read_codebase":              true,
+		"execute_and_evaluate":       true,
+	}
+	for _, decl := range decls {
+		if !expected[decl.Name] {
+			t.Errorf("unexpected tool: %q", decl.Name)
+		}
+		delete(expected, decl.Name)
+	}
+	if len(expected) > 0 {
+		for name := range expected {
+			t.Errorf("missing tool: %q", name)
+		}
+	}
+}
+
+func toolNames(decls []domain.ToolDeclaration) []string {
+	names := make([]string, len(decls))
+	for i, d := range decls {
+		names[i] = d.Name
+	}
+	return names
+}
+
+func TestSenseiService_SetupWorkspaceTool(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, runner)
+	_ = svc
+
+	// Execute setup_workspace tool directly
+	result, err := tools.Execute("setup_workspace", map[string]interface{}{
+		"topic_slug": "variables",
+		"files": map[string]interface{}{
+			"main.go":      "package main\n\nfunc main() {}",
+			"main_test.go": "package main\n\nimport \"testing\"",
+			"README.md":    "# Variables Exercise",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	res, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	if res["dir"] != "variables" {
+		t.Errorf("dir = %q, want variables", res["dir"])
+	}
+	if res["success"] != true {
+		t.Errorf("success = %v, want true", res["success"])
+	}
+
+	// Verify files were created via workspace
+	for _, fname := range []string{"variables/main.go", "variables/main_test.go", "variables/README.md"} {
+		if _, ok := ws.files[fname]; !ok {
+			t.Errorf("expected file %q to be created, files: %v", fname, ws.files)
+		}
+	}
+}
+
+func TestSenseiService_SetupWorkspace_PathTraversalRejected(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, runner)
+	_ = svc
+
+	_, err := tools.Execute("setup_workspace", map[string]interface{}{
+		"topic_slug": "../etc",
+		"files": map[string]interface{}{
+			"main.go": "package main",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for path traversal")
+	}
+	if !strings.Contains(err.Error(), "..") {
+		t.Errorf("expected error about '..', got %q", err.Error())
+	}
+}
+
+func TestSenseiService_ReadCodebaseTool(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	// Pre-populate workspace with files
+	ws.files["variables/main.go"] = "package main\n\nfunc main() {}"
+	ws.files["variables/main_test.go"] = "package main\n\nfunc TestMain(t *testing.T) {}"
+	ws.files["variables/README.md"] = "# Variables"
+	ws.directories["variables"] = true
+
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, runner)
+	_ = svc
+
+	result, err := tools.Execute("read_codebase", map[string]interface{}{
+		"topic_slug": "variables",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	res, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	files, ok := res["files"].(map[string]string)
+	if !ok {
+		t.Fatalf("expected files map, got %T", res["files"])
+	}
+	if len(files) != 2 {
+		t.Errorf("expected 2 .go files, got %d: %v", len(files), files)
+	}
+	// Should contain .go files but NOT README.md
+	if _, ok := files["variables/main.go"]; !ok {
+		t.Error("missing variables/main.go")
+	}
+	if _, ok := files["variables/main_test.go"]; !ok {
+		t.Error("missing variables/main_test.go")
+	}
+	if _, ok := files["variables/README.md"]; ok {
+		t.Error("README.md should not be included (not a .go file)")
+	}
+}
+
+func TestSenseiService_ReadCodebase_MissingDirectory(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, runner)
+	_ = svc
+
+	_, err := tools.Execute("read_codebase", map[string]interface{}{
+		"topic_slug": "nonexistent",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing directory")
+	}
+	if !strings.Contains(err.Error(), "no existe") {
+		t.Errorf("expected 'no existe', got %q", err.Error())
+	}
+}
+
+func TestSenseiService_ExecuteAndEvaluateTool(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+
+	// Set up a passing result for variables/
+	result, _ := domain.NewTestResult(true, "All tests pass\nTotal: 2 | Pasaron: 2 | Fallaron: 0", 100*time.Millisecond)
+	result.Stdout = "ok  \tvariable_test"
+	result.Stderr = ""
+	runner.results["/mock/workspace/variables"] = result
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, runner)
+	_ = svc
+
+	res, err := tools.Execute("execute_and_evaluate", map[string]interface{}{
+		"topic_slug": "variables",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	r, ok := res.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", res)
+	}
+	if r["passed"] != true {
+		t.Errorf("passed = %v, want true", r["passed"])
+	}
+	if r["output"] != result.Output {
+		t.Errorf("output = %q, want %q", r["output"], result.Output)
+	}
+}
+
+func TestSenseiService_ExecuteAndEvaluate_NilTestRunner(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, nil)
+	_ = svc
+
+	_, err := tools.Execute("execute_and_evaluate", map[string]interface{}{
+		"topic_slug": "variables",
+	})
+	if err == nil {
+		t.Fatal("expected error when TestRunner is nil")
+	}
+	if !strings.Contains(err.Error(), "TestRunner") && !strings.Contains(err.Error(), "testRunner") {
+		t.Errorf("expected error about TestRunner, got %q", err.Error())
+	}
+}
+
+func TestSenseiService_NewIntentHints(t *testing.T) {
+	provider := &mockSenseiProvider{
+		responses: [][]domain.ContentPart{
+			{textPart("Voy a ejecutar los tests.")},
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, runner)
+
+	// Messages with new intent hints should trigger tool-enabled requests
+	// "probar" is one of the new hints
+	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Probalo ejecutando los tests", newMockSession("s-hints"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if response != "Voy a ejecutar los tests." {
+		t.Fatalf("response = %q", response)
+	}
+	// Should have sent tools (since "probar" is in intent hints)
+	if len(provider.sendToolCounts) != 1 || provider.sendToolCounts[0] == 0 {
+		t.Fatalf("first SendMessage tools = %v, want a tool-enabled request for 'probar'", provider.sendToolCounts)
+	}
+}
+
+func TestSenseiService_EmptyFilesSetupWorkspace(t *testing.T) {
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	runner := newMockTestRunner()
+
+	svc := services.NewSenseiService(nil, tools, ws, roadmap, runner)
+	_ = svc
+
+	result, err := tools.Execute("setup_workspace", map[string]interface{}{
+		"topic_slug": "empty_topic",
+		"files":      map[string]interface{}{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	res, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	if res["success"] != true {
+		t.Errorf("success = %v, want true", res["success"])
+	}
+	// Directory should be created even with no files
+	if !ws.directories["empty_topic"] {
+		t.Error("expected empty_topic directory to be created")
+	}
+}
 
 func textPart(text string) domain.ContentPart {
 	return domain.ContentPart{Text: text}
@@ -150,7 +503,7 @@ func TestSenseiService_TextOnlyResponse(t *testing.T) {
 	tools := core.NewToolRegistry()
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s1")
 	ctx := context.Background()
@@ -193,7 +546,7 @@ func TestSenseiService_StartsWithToolsForWorkspaceIntent(t *testing.T) {
 	tools := core.NewToolRegistry()
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-fast-tools"))
 	if err != nil {
@@ -241,7 +594,7 @@ func TestSenseiService_SingleToolCall(t *testing.T) {
 
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s2")
 	ctx := context.Background()
@@ -293,7 +646,7 @@ func TestSenseiService_ListWorkspaceFilesTool(t *testing.T) {
 	ws.files["maps/ejercicio.go"] = "package main"
 	ws.files["variables/clase-1.go"] = "package main"
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-workspace-list"))
 	if err != nil {
@@ -331,7 +684,7 @@ func TestSenseiService_ReadWorkspaceFileTool(t *testing.T) {
 	ws := newMockWorkspace()
 	ws.files["variables/clase-1.go"] = "package main\n\nfunc main() {}"
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Revisá mi archivo", newMockSession("s-workspace-read"))
 	if err != nil {
@@ -371,7 +724,7 @@ func TestSenseiService_ReadRecentWorkspaceFileTool(t *testing.T) {
 	}
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, core.NewToolRegistry(), ws, roadmap)
+	svc := services.NewSenseiService(provider, core.NewToolRegistry(), ws, roadmap, nil)
 
 	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Empecemos con tipos y luego revisalo", newMockSession("s-workspace-recent"))
 	if err != nil {
@@ -417,7 +770,7 @@ func TestSenseiService_TopicFolderFromRoadmap(t *testing.T) {
 	}
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, core.NewToolRegistry(), ws, roadmap)
+	svc := services.NewSenseiService(provider, core.NewToolRegistry(), ws, roadmap, nil)
 
 	session := newMockSession("topic-folder")
 	ctx := context.Background()
@@ -500,7 +853,7 @@ func TestSenseiService_MultiToolSequential(t *testing.T) {
 
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s3")
 	ctx := context.Background()
@@ -569,7 +922,7 @@ func TestSenseiService_MaxRoundsExceeded(t *testing.T) {
 
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s4")
 	ctx := context.Background()
@@ -634,7 +987,7 @@ func TestSenseiService_ToolExecutionError(t *testing.T) {
 
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s5")
 	ctx := context.Background()
@@ -675,7 +1028,7 @@ func TestSenseiService_ProviderError(t *testing.T) {
 	tools := core.NewToolRegistry()
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s6")
 	ctx := context.Background()
@@ -731,7 +1084,7 @@ func TestSenseiService_StatusChannel(t *testing.T) {
 
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s7")
 	ctx := context.Background()
@@ -791,7 +1144,7 @@ func TestSenseiService_ContextTimeout(t *testing.T) {
 	tools := core.NewToolRegistry()
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s8")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -821,7 +1174,7 @@ func TestSenseiService_SessionMessagesPreserved(t *testing.T) {
 	tools := core.NewToolRegistry()
 	ws := newMockWorkspace()
 	roadmap := services.NewRoadmapService()
-	svc := services.NewSenseiService(provider, tools, ws, roadmap)
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
 	session := newMockSession("s9")
 	ctx := context.Background()

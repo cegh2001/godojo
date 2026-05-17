@@ -49,6 +49,16 @@ var senseiToolIntentHints = []string{
 	"terminé",
 	"complete",
 	"completé",
+	"setup",
+	"codebase",
+	"evaluar",
+	"test",
+	"probar",
+	"correr",
+	"corré",
+	"prueba",
+	"probalo",
+	"ejecutar",
 }
 
 type senseiRunMetrics struct {
@@ -84,6 +94,7 @@ type SenseiService struct {
 	tools               *core.ToolRegistry
 	workspace           ports.WorkspaceManager
 	roadmapSvc          *RoadmapService
+	testRunner          ports.TestRunner
 	mu                  sync.RWMutex
 	currentTopicSlug    string
 	recentWorkspaceFile string
@@ -95,12 +106,14 @@ func NewSenseiService(
 	tools *core.ToolRegistry,
 	workspace ports.WorkspaceManager,
 	roadmap *RoadmapService,
+	testRunner ports.TestRunner,
 ) *SenseiService {
 	svc := &SenseiService{
 		provider:   provider,
 		tools:      tools,
 		workspace:  workspace,
 		roadmapSvc: roadmap,
+		testRunner: testRunner,
 	}
 
 	// Register built-in tools
@@ -109,6 +122,11 @@ func NewSenseiService(
 	svc.registerListWorkspaceFiles()
 	svc.registerReadWorkspaceFile()
 	svc.registerReadRecentWorkspaceFile()
+
+	// Register new tools (Task 7)
+	svc.registerSetupWorkspace()
+	svc.registerReadCodebase()
+	svc.registerExecuteAndEvaluate()
 
 	return svc
 }
@@ -476,6 +494,152 @@ func (s *SenseiService) registerReadRecentWorkspaceFile() {
 		return map[string]interface{}{
 			"filename": filename,
 			"content":  content,
+		}, nil
+	})
+}
+
+// registerSetupWorkspace registers the setup_workspace tool.
+func (s *SenseiService) registerSetupWorkspace() {
+	s.tools.Register("setup_workspace", domain.ToolDeclaration{
+		Name:        "setup_workspace",
+		Description: "Crea un directorio temático en el workspace del estudiante y escribe los archivos proporcionados. Usala cuando necesites preparar el entorno de trabajo para un tema o ejercicio específico.",
+		Parameters: domain.ToolParameters{
+			Type: "OBJECT",
+			Properties: map[string]domain.ToolProperty{
+				"topic_slug": {Type: "STRING", Description: "Slug del tema para crear la carpeta temática (ej: 'variables', 'goroutines')"},
+				"files":      {Type: "OBJECT", Description: "Mapa de nombre de archivo a contenido. Las claves son nombres de archivo relativos."},
+			},
+			Required: []string{"topic_slug", "files"},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		topicSlug, _ := args["topic_slug"].(string)
+		filesRaw, _ := args["files"].(map[string]interface{})
+
+		if topicSlug == "" {
+			return nil, fmt.Errorf("topic_slug es requerido")
+		}
+
+		// Create the directory
+		if err := s.workspace.CreateDirectory(topicSlug); err != nil {
+			return nil, err
+		}
+
+		// Set current topic
+		s.setCurrentTopicSlug(topicSlug)
+
+		var createdFiles []string
+		for filename, contentRaw := range filesRaw {
+			content, ok := contentRaw.(string)
+			if !ok {
+				continue
+			}
+			relativePath := joinTopicPath(topicSlug, filename)
+			if err := s.workspace.CreateFile(relativePath, content); err != nil {
+				return nil, err
+			}
+			createdFiles = append(createdFiles, relativePath)
+			s.setRecentWorkspaceFile(relativePath)
+		}
+
+		return map[string]interface{}{
+			"dir":           topicSlug,
+			"files_created": createdFiles,
+			"success":       true,
+			"message":       fmt.Sprintf("Workspace configurado en %q con %d archivos.", topicSlug, len(createdFiles)),
+		}, nil
+	})
+}
+
+// registerReadCodebase registers the read_codebase tool.
+func (s *SenseiService) registerReadCodebase() {
+	s.tools.Register("read_codebase", domain.ToolDeclaration{
+		Name:        "read_codebase",
+		Description: "Lee todos los archivos .go de un directorio temático del workspace del estudiante. Usala para revisar el código del estudiante antes de dar feedback.",
+		Parameters: domain.ToolParameters{
+			Type: "OBJECT",
+			Properties: map[string]domain.ToolProperty{
+				"topic_slug": {Type: "STRING", Description: "Slug del tema del cual leer los archivos (ej: 'variables')"},
+			},
+			Required: []string{"topic_slug"},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		topicSlug, _ := args["topic_slug"].(string)
+
+		if topicSlug == "" {
+			return nil, fmt.Errorf("topic_slug es requerido")
+		}
+
+		entries, err := s.workspace.ListDirectory(topicSlug)
+		if err != nil {
+			return nil, err
+		}
+
+		files := make(map[string]string)
+		for _, entry := range entries {
+			if entry.IsDir || !strings.HasSuffix(entry.Name, ".go") {
+				continue
+			}
+			relativePath := joinTopicPath(topicSlug, entry.Name)
+			content, readErr := s.workspace.ReadFile(relativePath)
+			if readErr != nil {
+				continue // skip unreadable files
+			}
+			files[relativePath] = content
+		}
+
+		if len(files) == 0 {
+			return nil, fmt.Errorf("no se encontraron archivos .go en %q", topicSlug)
+		}
+
+		return map[string]interface{}{
+			"topic_slug": topicSlug,
+			"files":      files,
+			"file_count": len(files),
+		}, nil
+	})
+}
+
+// registerExecuteAndEvaluate registers the execute_and_evaluate tool.
+func (s *SenseiService) registerExecuteAndEvaluate() {
+	s.tools.Register("execute_and_evaluate", domain.ToolDeclaration{
+		Name:        "execute_and_evaluate",
+		Description: "Ejecuta los tests Go en el directorio del tema indicado y devuelve los resultados. Usala cuando el estudiante quiera probar su código o cuando necesites verificar si un ejercicio pasa los tests.",
+		Parameters: domain.ToolParameters{
+			Type: "OBJECT",
+			Properties: map[string]domain.ToolProperty{
+				"topic_slug": {Type: "STRING", Description: "Slug del tema cuyos tests querés ejecutar (ej: 'variables')"},
+			},
+			Required: []string{"topic_slug"},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		topicSlug, _ := args["topic_slug"].(string)
+
+		if topicSlug == "" {
+			return nil, fmt.Errorf("topic_slug es requerido")
+		}
+
+		if s.testRunner == nil {
+			return nil, fmt.Errorf("TestRunner no configurado — no se pueden ejecutar tests")
+		}
+
+		workspacePath := s.workspace.WorkspacePath()
+		exerciseDir := workspacePath + "/" + topicSlug
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		result, err := s.testRunner.Run(ctx, exerciseDir)
+		if err != nil {
+			return nil, fmt.Errorf("error al ejecutar tests: %w", err)
+		}
+
+		return map[string]interface{}{
+			"topic_slug": topicSlug,
+			"passed":     result.Passed,
+			"output":     result.Output,
+			"stdout":     result.Stdout,
+			"stderr":     result.Stderr,
+			"duration":   result.Duration.String(),
 		}, nil
 	})
 }

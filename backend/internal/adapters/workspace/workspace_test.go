@@ -250,6 +250,291 @@ func TestCreateFile_NoExtensionRejected(t *testing.T) {
 	}
 }
 
+// --- CreateDirectory tests ---
+
+func TestCreateDirectory_Valid(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	err := wm.CreateDirectory("variables")
+	if err != nil {
+		t.Fatalf("CreateDirectory returned unexpected error: %v", err)
+	}
+
+	// Verify directory exists on disk
+	fi, err := os.Stat(filepath.Join(dir, "variables"))
+	if err != nil {
+		t.Fatalf("directory not created on disk: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Error("created path is not a directory")
+	}
+}
+
+func TestCreateDirectory_Nested(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	err := wm.CreateDirectory("variables/ejercicios/nivel-1")
+	if err != nil {
+		t.Fatalf("CreateDirectory nested returned unexpected error: %v", err)
+	}
+
+	// Verify whole tree exists
+	nested := filepath.Join(dir, "variables", "ejercicios", "nivel-1")
+	fi, err := os.Stat(nested)
+	if err != nil {
+		t.Fatalf("nested directory not created: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Error("nested created path is not a directory")
+	}
+}
+
+func TestCreateDirectory_PathTraversalRejected(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	err := wm.CreateDirectory("../../etc")
+	if err == nil {
+		t.Fatal("expected error for path traversal, got nil")
+	}
+}
+
+func TestCreateDirectory_DotDotAnywhereRejected(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	attacks := []string{
+		"../escape",
+		"sub/../../passwd",
+		"..",
+		"a/../b",
+	}
+
+	for _, name := range attacks {
+		t.Run("attack="+name, func(t *testing.T) {
+			err := wm.CreateDirectory(name)
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", name)
+			}
+		})
+	}
+}
+
+func TestCreateDirectory_EmptyNameRejected(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	err := wm.CreateDirectory("")
+	if err == nil {
+		t.Fatal("expected error for empty name, got nil")
+	}
+}
+
+func TestCreateDirectory_AlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	// Create the directory first directly
+	existingDir := filepath.Join(dir, "existing")
+	if err := os.MkdirAll(existingDir, 0755); err != nil {
+		t.Fatalf("setup MkdirAll failed: %v", err)
+	}
+
+	// CreateDirectory should succeed (MkdirAll is idempotent)
+	err := wm.CreateDirectory("existing")
+	if err != nil {
+		t.Errorf("CreateDirectory on existing dir should succeed: %v", err)
+	}
+}
+
+// --- ListDirectory tests ---
+
+func TestListDirectory_ReturnsEntries(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	// Populate directory with files and subdirectories
+	if err := wm.CreateFile("main.go", "package main"); err != nil {
+		t.Fatalf("setup CreateFile failed: %v", err)
+	}
+	if err := wm.CreateFile("test.go", "package main"); err != nil {
+		t.Fatalf("setup CreateFile failed: %v", err)
+	}
+	if err := wm.CreateDirectory("subdir"); err != nil {
+		t.Fatalf("setup CreateDirectory failed: %v", err)
+	}
+
+	entries, err := wm.ListDirectory(".")
+	if err != nil {
+		t.Fatalf("ListDirectory returned unexpected error: %v", err)
+	}
+
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %+v", len(entries), entries)
+	}
+
+	found := map[string]bool{}
+	for _, e := range entries {
+		found[e.Name] = true
+	}
+
+	if !found["main.go"] {
+		t.Error("missing main.go in listing")
+	}
+	if !found["test.go"] {
+		t.Error("missing test.go in listing")
+	}
+	if !found["subdir"] {
+		t.Error("missing subdir in listing")
+	}
+
+	// Verify subdir is marked as directory
+	for _, e := range entries {
+		if e.Name == "subdir" && !e.IsDir {
+			t.Error("subdir should have IsDir=true")
+		}
+	}
+}
+
+func TestListDirectory_NonRecursive(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	if err := wm.CreateFile("top.go", "package main"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := wm.CreateDirectory("sub"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := wm.CreateFile("sub/nested.go", "package main"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	entries, err := wm.ListDirectory(".")
+	if err != nil {
+		t.Fatalf("ListDirectory(.): %v", err)
+	}
+
+	// Should only see top.go and sub (not sub/nested.go)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries at root, got %d: %+v", len(entries), entries)
+	}
+
+	for _, e := range entries {
+		if e.Name == "nested.go" {
+			t.Error("ListDirectory should be non-recursive, found nested.go at root")
+		}
+	}
+
+	// Now list the sub directory
+	subEntries, err := wm.ListDirectory("sub")
+	if err != nil {
+		t.Fatalf("ListDirectory(sub): %v", err)
+	}
+	if len(subEntries) != 1 {
+		t.Fatalf("expected 1 entry in sub, got %d", len(subEntries))
+	}
+	if subEntries[0].Name != "nested.go" {
+		t.Errorf("expected nested.go in sub, got %q", subEntries[0].Name)
+	}
+}
+
+func TestListDirectory_FileSize(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	if err := wm.CreateFile("sized.go", "package main\n\nfunc main() {}"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	entries, err := wm.ListDirectory(".")
+	if err != nil {
+		t.Fatalf("ListDirectory: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Size <= 0 {
+		t.Errorf("file size should be > 0, got %d", entries[0].Size)
+	}
+	if entries[0].IsDir {
+		t.Error("file should have IsDir=false")
+	}
+}
+
+func TestListDirectory_MissingDir(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	_, err := wm.ListDirectory("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent directory, got nil")
+	}
+}
+
+func TestListDirectory_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	// Create an empty directory
+	if err := wm.CreateDirectory("empty"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	entries, err := wm.ListDirectory("empty")
+	if err != nil {
+		t.Fatalf("ListDirectory empty dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries in empty dir, got %d", len(entries))
+	}
+}
+
+func TestListDirectory_PathTraversalRejected(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	_, err := wm.ListDirectory("../etc")
+	if err == nil {
+		t.Fatal("expected error for path traversal in ListDirectory, got nil")
+	}
+}
+
+func TestListDirectory_Subdirectory(t *testing.T) {
+	dir := t.TempDir()
+	wm := workspace.NewWorkspaceManager(dir)
+
+	if err := wm.CreateDirectory("variables"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := wm.CreateFile("variables/main.go", "package main"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := wm.CreateFile("variables/main_test.go", "package main"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	entries, err := wm.ListDirectory("variables")
+	if err != nil {
+		t.Fatalf("ListDirectory(variables): %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	names := []string{entries[0].Name, entries[1].Name}
+	if names[0] != "main.go" {
+		t.Errorf("first entry should be main.go, got %q", names[0])
+	}
+	if names[1] != "main_test.go" {
+		t.Errorf("second entry should be main_test.go, got %q", names[1])
+	}
+}
+
 func TestWriteThenRead_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	wm := workspace.NewWorkspaceManager(dir)

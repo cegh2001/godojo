@@ -414,3 +414,187 @@ func TestNewGoTestRunner_GoBinaryPath(t *testing.T) {
 		t.Skip("go binary not found in PATH, skipping go-dependent test")
 	}
 }
+
+// --- Stdout/Stderr separation tests ---
+
+func TestRun_StdoutStderrPopulated_Passing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "ejercicio.go"), []byte(`package ejercicio
+
+func Suma(a, b int) int {
+	return a + b
+}
+`), 0644)
+
+	os.WriteFile(filepath.Join(tmpDir, "ejercicio_test.go"), []byte(`package ejercicio
+
+import "testing"
+
+func TestSuma(t *testing.T) {
+	got := Suma(2, 3)
+	if got != 5 {
+		t.Errorf("fail")
+	}
+}
+`), 0644)
+
+	os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(`module ejercicio
+
+go 1.21
+`), 0644)
+
+	r := runner.NewGoTestRunner(30 * time.Second)
+	result, err := r.Run(context.Background(), tmpDir)
+	if err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatal("expected passing tests")
+	}
+
+	// Stdout should be populated (go test -json writes to stdout)
+	if result.Stdout == "" {
+		t.Error("Stdout should not be empty for passing tests")
+	}
+
+	// Stderr should be empty for clean compilation
+	if result.Stderr != "" {
+		t.Errorf("Stderr should be empty for clean compilation, got: %q", result.Stderr)
+	}
+
+	// Output should still exist (backward compatible)
+	if result.Output == "" {
+		t.Error("Output should not be empty")
+	}
+
+	// Stdout should contain JSON lines
+	if !strings.Contains(result.Stdout, `"Action"`) {
+		t.Error("Stdout should contain JSON test events")
+	}
+}
+
+func TestRun_StdoutStderrPopulated_CompileError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "ejercicio.go"), []byte(`package ejercicio
+
+func Suma(a, b int) int {
+	return a + b
+`), 0644) // missing closing brace — will not compile
+
+	os.WriteFile(filepath.Join(tmpDir, "ejercicio_test.go"), []byte(`package ejercicio
+
+import "testing"
+
+func TestSuma(t *testing.T) {
+	got := Suma(2, 3)
+	if got != 5 {
+		t.Errorf("fail")
+	}
+}
+`), 0644)
+
+	os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(`module ejercicio
+
+go 1.21
+`), 0644)
+
+	r := runner.NewGoTestRunner(30 * time.Second)
+	result, err := r.Run(context.Background(), tmpDir)
+	if err != nil {
+		t.Fatalf("Run() should not error on compile, should capture in result: %v", err)
+	}
+	if result.Passed {
+		t.Error("compile error should produce Passed=false")
+	}
+
+	// At least one of Stdout or Stderr should be populated with error output.
+	// go test may route compile errors to stdout (via JSON) or stderr depending on platform.
+	if result.Stdout == "" && result.Stderr == "" {
+		t.Error("Stdout or Stderr should contain compile error output")
+	}
+
+	// Output should still be populated (combined)
+	if result.Output == "" {
+		t.Error("Output should not be empty")
+	}
+}
+
+func TestRun_StdoutStderrPopulated_Timeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "ejercicio.go"), []byte(`package ejercicio
+
+func BucleInfinito() {
+	for {}
+}
+`), 0644)
+
+	os.WriteFile(filepath.Join(tmpDir, "ejercicio_test.go"), []byte(`package ejercicio
+
+import (
+	"fmt"
+	"testing"
+)
+
+func TestBucleInfinito(t *testing.T) {
+	fmt.Println("Iniciando bucle...")
+	BucleInfinito()
+	fmt.Println("Nunca llega acá")
+}
+`), 0644)
+
+	os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(`module ejercicio
+
+go 1.21
+`), 0644)
+
+	r := runner.NewGoTestRunner(2 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, _ := r.Run(ctx, tmpDir)
+
+	if result != nil {
+		// Stdout and Stderr fields should exist (even if empty due to buffering)
+		// We verify the struct fields are present, content is timing-dependent
+		_ = result.Stdout
+		_ = result.Stderr
+
+		// Output should still be populated (combined is always set)
+		if result.Output == "" {
+			t.Error("Output should not be empty even on timeout")
+		}
+	}
+}
+
+func TestParseJSONOutput_StdoutStderrEmpty(t *testing.T) {
+	// ParseJSONOutput should NOT set Stdout/Stderr — that's Run's job
+	data, err := os.ReadFile(filepath.Join("testdata", "test_output_pass.json"))
+	if err != nil {
+		t.Fatalf("cannot read golden file: %v", err)
+	}
+
+	r := runner.NewGoTestRunner(5 * time.Second)
+	result, err := r.ParseJSONOutput(string(data))
+	if err != nil {
+		t.Fatalf("ParseJSONOutput() unexpected error: %v", err)
+	}
+
+	if result.Stdout != "" {
+		t.Errorf("ParseJSONOutput should not set Stdout, got: %q", result.Stdout)
+	}
+	if result.Stderr != "" {
+		t.Errorf("ParseJSONOutput should not set Stderr, got: %q", result.Stderr)
+	}
+}

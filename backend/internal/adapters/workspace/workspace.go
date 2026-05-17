@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"godojo/internal/core/ports"
 )
 
 // WorkspaceManager handles safe file operations within the workspace directory.
@@ -104,6 +106,80 @@ func (w *WorkspaceManager) ListFiles() ([]string, error) {
 // WorkspacePath returns the absolute path to the workspace directory.
 func (w *WorkspaceManager) WorkspacePath() string {
 	return w.basePath
+}
+
+// CreateDirectory creates a directory (and any parents) inside the workspace.
+// Path traversal via ".." is rejected. No .go extension requirement.
+func (w *WorkspaceManager) CreateDirectory(name string) error {
+	safe, err := w.safeDirPath(name)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(safe, 0755); err != nil {
+		return fmt.Errorf("no se pudo crear el directorio %q: %w", name, err)
+	}
+
+	return nil
+}
+
+// ListDirectory returns the entries of a directory inside the workspace,
+// non-recursively (one level deep). Path traversal via ".." is rejected.
+func (w *WorkspaceManager) ListDirectory(name string) ([]ports.FileInfo, error) {
+	safe, err := w.safeDirPath(name)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(safe)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("el directorio %q no existe", name)
+		}
+		return nil, fmt.Errorf("no se pudo leer el directorio %q: %w", name, err)
+	}
+
+	result := make([]ports.FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		result = append(result, ports.FileInfo{
+			Name:  entry.Name(),
+			IsDir: entry.IsDir(),
+			Size:  info.Size(),
+		})
+	}
+
+	return result, nil
+}
+
+// safeDirPath validates and resolves a relative path within the workspace
+// for directory operations. Unlike safePath, it does NOT enforce .go suffix.
+func (w *WorkspaceManager) safeDirPath(name string) (string, error) {
+	// Reject empty name
+	if name == "" {
+		return "", fmt.Errorf("el nombre del directorio no puede estar vacío")
+	}
+
+	// Reject path traversal
+	if strings.Contains(name, "..") {
+		return "", fmt.Errorf("no se permite usar '..' en la ruta: %q", name)
+	}
+
+	// Resolve to absolute path
+	abs, err := filepath.Abs(filepath.Join(w.basePath, name))
+	if err != nil {
+		return "", fmt.Errorf("no se pudo resolver la ruta: %w", err)
+	}
+
+	// Verify it stays within basePath
+	if !strings.HasPrefix(abs, w.basePath+string(filepath.Separator)) && abs != w.basePath {
+		return "", fmt.Errorf("la ruta %q está fuera del workspace", name)
+	}
+
+	return abs, nil
 }
 
 // safePath validates and resolves a relative path within the workspace.

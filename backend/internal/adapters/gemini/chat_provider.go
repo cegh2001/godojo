@@ -1,3 +1,4 @@
+// Deprecated: Replaced by adapters/genai.GenaiProvider. Will be removed in a future version.
 package gemini
 
 import (

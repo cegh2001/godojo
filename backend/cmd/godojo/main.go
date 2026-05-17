@@ -10,13 +10,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"godojo/internal/adapters/chatstore"
-	"godojo/internal/adapters/gemini"
+	"godojo/internal/adapters/genai"
 	"godojo/internal/adapters/repository"
+	"godojo/internal/adapters/runner"
 	"godojo/internal/adapters/store"
 	"godojo/internal/adapters/tui"
 	"godojo/internal/adapters/workspace"
 	"godojo/internal/core"
 	"godojo/internal/core/services"
+	"time"
 )
 
 func main() {
@@ -47,7 +49,7 @@ func main() {
 	// 2. Create adapters
 	progressStore := store.NewJSONProgressStore(progressPath)
 	exerciseRepo := repository.NewEmbedExerciseRepo()
-	chatProviderInstance := gemini.NewChatProvider()
+	chatProviderInstance := genai.NewGenaiProvider()
 	chatStore := chatstore.NewChatStore(filepath.Join(homeDir, ".godojo", "sessions"))
 
 	// 3. Create services
@@ -59,7 +61,8 @@ func main() {
 	toolRegistry := core.NewToolRegistry()
 	workspacePath := filepath.Join(homeDir, ".godojo", "workspace")
 	workspaceManager := workspace.NewWorkspaceManager(workspacePath)
-	senseiSvc := services.NewSenseiService(chatProviderInstance, toolRegistry, workspaceManager, roadmapSvc)
+	testRunner := runner.NewGoTestRunner(30 * time.Second)
+	senseiSvc := services.NewSenseiService(chatProviderInstance, toolRegistry, workspaceManager, roadmapSvc, testRunner)
 
 	// 5. Create TUI model (simplified: only sensei + chat)
 	senseiSystemPrompt := `Sos un sensei de Go, un maestro experto en programación Go.

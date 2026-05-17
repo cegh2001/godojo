@@ -2,13 +2,16 @@ package main
 
 import (
 	"testing"
+	"time"
 
-	"godojo/internal/adapters/gemini"
+	"godojo/internal/adapters/genai"
 	"godojo/internal/adapters/repository"
+	"godojo/internal/adapters/runner"
 	"godojo/internal/adapters/store"
 	"godojo/internal/adapters/tui"
 	"godojo/internal/adapters/workspace"
 	"godojo/internal/core"
+	"godojo/internal/core/ports"
 	"godojo/internal/core/services"
 )
 
@@ -39,11 +42,12 @@ func TestWiring_NoPanic(t *testing.T) {
 	}
 
 	// 3. Create SenseiService
-	chatProviderInstance := gemini.NewChatProvider()
+	chatProviderInstance := genai.NewGenaiProvider()
+	testRunner := runner.NewGoTestRunner(30 * time.Second)
 	toolRegistry := core.NewToolRegistry()
 	workspacePath := t.TempDir()
 	workspaceManager := workspace.NewWorkspaceManager(workspacePath)
-	senseiSvc := services.NewSenseiService(chatProviderInstance, toolRegistry, workspaceManager, roadmapSvc)
+	senseiSvc := services.NewSenseiService(chatProviderInstance, toolRegistry, workspaceManager, roadmapSvc, testRunner)
 
 	// 4. Create TUI model — should not panic
 	model := tui.NewModel(senseiSvc, nil, "")
@@ -51,6 +55,35 @@ func TestWiring_NoPanic(t *testing.T) {
 	// 5. Verify model is initialized
 	if model.Init() == nil {
 		t.Fatal("model.Init() returned nil command")
+	}
+}
+
+func TestWiring_UsesGenaiProvider(t *testing.T) {
+	// Verifies that NewGenaiProvider() returns a valid SenseiProvider implementation.
+	provider := genai.NewGenaiProvider()
+
+	// Type assertion: provider should implement ports.SenseiProvider
+	senseiProvider, ok := interface{}(provider).(ports.SenseiProvider)
+	if !ok {
+		t.Fatal("NewGenaiProvider() does not implement ports.SenseiProvider")
+	}
+
+	// Structural check: provider must not be nil
+	if senseiProvider == nil {
+		t.Fatal("SenseiProvider is nil")
+	}
+}
+
+func TestWiring_UsesGoTestRunner(t *testing.T) {
+	// Verifies that a real GoTestRunner is wired in and implements ports.TestRunner.
+	testRunner := runner.NewGoTestRunner(30 * time.Second)
+
+	testRunnerInterface, ok := interface{}(testRunner).(ports.TestRunner)
+	if !ok {
+		t.Fatal("NewGoTestRunner() does not implement ports.TestRunner")
+	}
+	if testRunnerInterface == nil {
+		t.Fatal("TestRunner is nil")
 	}
 }
 

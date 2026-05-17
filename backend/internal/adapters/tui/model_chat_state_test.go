@@ -195,6 +195,7 @@ func TestModel_ChatSend_WithSenseiService_ShowsUserInputImmediately(t *testing.T
 		core.NewToolRegistry(),
 		nil,
 		services.NewRoadmapService(),
+		nil,
 	)
 
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})

@@ -9,7 +9,9 @@ import (
 // Migration note: the long-term direction is Gemma's CodeExecution tool output.
 type TestResult struct {
 	Passed   bool
-	Output   string
+	Output   string          // combined summary (backward-compatible)
+	Stdout   string          // raw stdout captured separately
+	Stderr   string          // raw stderr captured separately
 	Duration time.Duration
 }
 

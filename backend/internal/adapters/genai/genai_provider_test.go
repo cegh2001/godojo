@@ -301,3 +301,196 @@ func TestGenaiProvider_mapGenaiError_DeadlineExceeded(t *testing.T) {
 		t.Errorf("expected timeout message, got %q", err)
 	}
 }
+
+// --- Model selection tests ---
+
+func TestNewGenaiProvider_WithModelSelection(t *testing.T) {
+	tests := []struct {
+		name           string
+		fastEnv        string
+		flashEnv       string
+		wantFastModel  string
+		wantFlashModel string
+	}{
+		{
+			name:           "both env vars set",
+			fastEnv:        "gemma-4-26b-a4b-it",
+			flashEnv:       "gemini-2.5-flash",
+			wantFastModel:  "gemma-4-26b-a4b-it",
+			wantFlashModel: "gemini-2.5-flash",
+		},
+		{
+			name:           "only fast model set",
+			fastEnv:        "custom-fast-model",
+			flashEnv:       "",
+			wantFastModel:  "custom-fast-model",
+			wantFlashModel: "",
+		},
+		{
+			name:           "neither set, use defaults",
+			fastEnv:        "",
+			flashEnv:       "",
+			wantFastModel:  defaultFastModel,
+			wantFlashModel: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set env vars for this test case
+			if tt.fastEnv != "" {
+				t.Setenv(senseiFastModelEnv, tt.fastEnv)
+			}
+			if tt.flashEnv != "" {
+				t.Setenv(senseiFlashModelEnv, tt.flashEnv)
+			}
+
+			p := NewGenaiProvider()
+
+			if p.fastModel != tt.wantFastModel {
+				t.Errorf("fastModel = %q, want %q", p.fastModel, tt.wantFastModel)
+			}
+			if p.flashModel != tt.wantFlashModel {
+				t.Errorf("flashModel = %q, want %q", p.flashModel, tt.wantFlashModel)
+			}
+		})
+	}
+}
+
+func TestSelectEffectiveModel_ToolsPresent(t *testing.T) {
+	// When tools are present, always use heavy model
+	result := selectEffectiveModel(
+		[]domain.ToolDeclaration{{Name: "test_tool"}},
+		nil,
+		"fast-model",
+		"flash-model",
+		"heavy-model",
+	)
+	if result != "heavy-model" {
+		t.Errorf("with tools present, got %q, want heavy-model", result)
+	}
+}
+
+func TestSelectEffectiveModel_NoTools_FastModel(t *testing.T) {
+	// No tools, no flash configured → fast model
+	result := selectEffectiveModel(
+		nil,
+		[]chatstore.ChatMessage{{Role: "user", Content: "¿Qué es un puntero?"}},
+		"fast-model",
+		"", // flash disabled
+		"heavy-model",
+	)
+	if result != "fast-model" {
+		t.Errorf("with no tools and no flash, got %q, want fast-model", result)
+	}
+}
+
+func TestSelectEffectiveModel_NoTools_FlashTriggered(t *testing.T) {
+	// Simple greeting + flash configured → flash model
+	result := selectEffectiveModel(
+		nil,
+		[]chatstore.ChatMessage{{Role: "user", Content: "hola"}},
+		"fast-model",
+		"flash-model",
+		"heavy-model",
+	)
+	if result != "flash-model" {
+		t.Errorf("with greeting 'hola' and flash enabled, got %q, want flash-model", result)
+	}
+}
+
+func TestSelectEffectiveModel_NoTools_SimpleIntentNoFlash(t *testing.T) {
+	// Simple greeting but flash NOT configured → fast model
+	result := selectEffectiveModel(
+		nil,
+		[]chatstore.ChatMessage{{Role: "user", Content: "holi"}},
+		"fast-model",
+		"", // no flash
+		"heavy-model",
+	)
+	if result != "fast-model" {
+		t.Errorf("with greeting and no flash, got %q, want fast-model", result)
+	}
+}
+
+func TestSelectEffectiveModel_FlashIntentHints(t *testing.T) {
+	tests := []struct {
+		name          string
+		message       string
+		flashDisabled bool
+		wantFast      string
+		wantFlash     string
+	}{
+		{name: "hola triggers flash", message: "hola", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "holi triggers flash", message: "holi", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "chau triggers flash", message: "chau", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "adiós triggers flash", message: "adiós", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "qué tal triggers flash", message: "qué tal", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "qué podés hacer triggers flash", message: "qué podés hacer", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "gracias triggers flash", message: "gracias", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "buenas triggers flash", message: "buenas", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "ayuda triggers flash", message: "ayuda", flashDisabled: false, wantFlash: "flash-model"},
+		{name: "complex question uses fast", message: "¿Cómo implemento un binary search tree en Go?", flashDisabled: false, wantFast: "fast-model"},
+		{name: "flash disabled falls back to fast", message: "hola", flashDisabled: true, wantFast: "fast-model"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flashModel := "flash-model"
+			if tt.flashDisabled {
+				flashModel = ""
+			}
+
+			result := selectEffectiveModel(
+				nil,
+				[]chatstore.ChatMessage{{Role: "user", Content: tt.message}},
+				"fast-model",
+				flashModel,
+				"heavy-model",
+			)
+
+			if tt.wantFlash != "" {
+				if result != tt.wantFlash {
+					t.Errorf("message %q got %q, want flash: %q", tt.message, result, tt.wantFlash)
+				}
+			} else if tt.wantFast != "" {
+				if result != tt.wantFast {
+					t.Errorf("message %q got %q, want fast: %q", tt.message, result, tt.wantFast)
+				}
+			}
+		})
+	}
+}
+
+func TestSelectEffectiveModel_LastUserMessageOnly(t *testing.T) {
+	// Only the LAST user message is checked for simple intent
+	history := []chatstore.ChatMessage{
+		{Role: "user", Content: "hola"},
+		{Role: "sensei", Content: "¡Buenas! ¿En qué te ayudo?"},
+		{Role: "user", Content: "¿Cómo implemento concurrencia con goroutines?"},
+	}
+	result := selectEffectiveModel(
+		nil,
+		history,
+		"fast-model",
+		"flash-model",
+		"heavy-model",
+	)
+	if result != "fast-model" {
+		t.Errorf("last message is complex, should use fast model, got %q", result)
+	}
+}
+
+func TestSelectEffectiveModel_EmptyHistory_UsesFast(t *testing.T) {
+	// No messages → fast model
+	result := selectEffectiveModel(
+		nil,
+		nil,
+		"fast-model",
+		"flash-model",
+		"heavy-model",
+	)
+	if result != "fast-model" {
+		t.Errorf("empty history with no tools, got %q, want fast-model", result)
+	}
+}

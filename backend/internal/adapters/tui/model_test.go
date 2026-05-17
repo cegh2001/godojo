@@ -198,3 +198,66 @@ func TestModel_WindowSizeMsg(t *testing.T) {
 		t.Errorf("height = %d, want 40", updated.height)
 	}
 }
+
+// --- Streaming message type tests ---
+
+func TestStreamLineMsg_Instantiable(t *testing.T) {
+	msg := streamLineMsg{text: "partial response"}
+
+	if msg.text != "partial response" {
+		t.Errorf("text = %q, want %q", msg.text, "partial response")
+	}
+
+	// Verify it satisfies tea.Msg (compile-time check)
+	var _ tea.Msg = streamLineMsg{}
+	_ = msg // prevent unused warning
+}
+
+func TestStreamCompleteMsg_Instantiable(t *testing.T) {
+	msg := streamCompleteMsg{}
+
+	// Verify it satisfies tea.Msg
+	var _ tea.Msg = streamCompleteMsg{}
+	_ = msg
+}
+
+func TestStreamSubscriptionMsg_Instantiable(t *testing.T) {
+	ch := make(chan string, 1)
+	ch <- "test"
+	msg := streamSubscriptionMsg{ch: ch}
+
+	if msg.ch == nil {
+		t.Fatal("ch should not be nil")
+	}
+
+	// Read from channel to verify it's the same one
+	select {
+	case val := <-msg.ch:
+		if val != "test" {
+			t.Errorf("received %q, want %q", val, "test")
+		}
+	default:
+		t.Error("expected to read from channel")
+	}
+
+	// Verify it satisfies tea.Msg
+	var _ tea.Msg = streamSubscriptionMsg{}
+	_ = msg
+}
+
+func TestModel_ChatStreamingText_FieldPresent(t *testing.T) {
+	m := newModelTest()
+
+	// Zero value check
+	if m.chatStreamingText.Len() != 0 {
+		t.Errorf("initial chatStreamingText length = %d, want 0", m.chatStreamingText.Len())
+	}
+
+	// Write something and verify
+	m.chatStreamingText.WriteString("Hola ")
+	m.chatStreamingText.WriteString("mundo")
+
+	if m.chatStreamingText.String() != "Hola mundo" {
+		t.Errorf("chatStreamingText = %q, want %q", m.chatStreamingText.String(), "Hola mundo")
+	}
+}

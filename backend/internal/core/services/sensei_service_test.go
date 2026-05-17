@@ -32,6 +32,11 @@ type mockSenseiProvider struct {
 	lastFunctionResponseCallID string
 	lastFunctionResponseResult interface{}
 	err                        error // if set, return this error instead of next response
+
+	// SendMessageStream support
+	mockStreamResponse   func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error)
+	sendStreamCalls      int
+	sendStreamToolCounts []int
 }
 
 func (m *mockSenseiProvider) nextResponse() ([]domain.ContentPart, error) {
@@ -54,6 +59,21 @@ func (m *mockSenseiProvider) SendMessage(ctx context.Context, systemPrompt strin
 	m.sendToolCounts = append(m.sendToolCounts, len(tools))
 	m.mu.Unlock()
 	return m.nextResponse()
+}
+
+func (m *mockSenseiProvider) SendMessageStream(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+	m.mu.Lock()
+	m.sendStreamCalls++
+	m.sendStreamToolCounts = append(m.sendStreamToolCounts, len(tools))
+	m.mu.Unlock()
+
+	if m.mockStreamResponse != nil {
+		return m.mockStreamResponse(ctx, systemPrompt, history, tools)
+	}
+	// Default no-op stub: return a closed empty channel
+	ch := make(chan ports.StreamChunk)
+	close(ch)
+	return ch, nil
 }
 
 func (m *mockSenseiProvider) SendFunctionResponse(ctx context.Context, history []chatstore.ChatMessage, callID string, name string, result interface{}) ([]domain.ContentPart, error) {
@@ -1202,5 +1222,155 @@ func TestSenseiService_SessionMessagesPreserved(t *testing.T) {
 	}
 	if senseiMsg.Content != "Hola, ¿cómo va?" {
 		t.Errorf("sensei message content = %q", senseiMsg.Content)
+	}
+}
+
+// --- Task 2: SendMessageStream tests on mockSenseiProvider ---
+
+// TestMockSenseiProvider_SendMessageStream_DefaultNoOp verifies that the default
+// no-op stub returns a closed empty channel with nil error when no custom
+// mockStreamResponse is set.
+func TestMockSenseiProvider_SendMessageStream_DefaultNoOp(t *testing.T) {
+	m := &mockSenseiProvider{}
+
+	ch, err := m.SendMessageStream(context.Background(), "Sos un sensei.", nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch == nil {
+		t.Fatal("expected non-nil channel")
+	}
+
+	// Channel should be already closed
+	_, ok := <-ch
+	if ok {
+		t.Error("expected closed channel (no chunks sent)")
+	}
+}
+
+// TestMockSenseiProvider_SendMessageStream_CustomResponse verifies that a custom
+// mockStreamResponse is delegated to when set.
+func TestMockSenseiProvider_SendMessageStream_CustomResponse(t *testing.T) {
+	expected := []ports.StreamChunk{
+		{Text: "Hola"},
+		{Text: " mundo"},
+		{Done: true},
+	}
+
+	m := &mockSenseiProvider{
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, len(expected))
+			for _, c := range expected {
+				ch <- c
+			}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	ch, err := m.SendMessageStream(context.Background(), "Sos un sensei.", nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var chunks []ports.StreamChunk
+	for c := range ch {
+		chunks = append(chunks, c)
+	}
+
+	if len(chunks) != len(expected) {
+		t.Fatalf("got %d chunks, want %d", len(chunks), len(expected))
+	}
+	for i, c := range chunks {
+		if c.Text != expected[i].Text {
+			t.Errorf("chunk[%d].Text = %q, want %q", i, c.Text, expected[i].Text)
+		}
+		if c.Done != expected[i].Done {
+			t.Errorf("chunk[%d].Done = %v, want %v", i, c.Done, expected[i].Done)
+		}
+	}
+}
+
+// TestMockSenseiProvider_SendMessageStream_ErrorPropagation verifies that errors
+// from the mockStreamResponse are propagated.
+func TestMockSenseiProvider_SendMessageStream_ErrorPropagation(t *testing.T) {
+	expectedErr := errors.New("simulated stream failure")
+
+	m := &mockSenseiProvider{
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			return nil, expectedErr
+		},
+	}
+
+	ch, err := m.SendMessageStream(context.Background(), "Sos un sensei.", nil, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != expectedErr.Error() {
+		t.Errorf("error = %q, want %q", err.Error(), expectedErr.Error())
+	}
+	if ch != nil {
+		t.Error("channel should be nil on error")
+	}
+}
+
+// TestMockSenseiProvider_SendMessageStream_TracksCalls verifies that
+// sendStreamCalls and sendStreamToolCounts are tracked.
+func TestMockSenseiProvider_SendMessageStream_TracksCalls(t *testing.T) {
+	m := &mockSenseiProvider{}
+
+	// Call with 3 tools
+	_, _ = m.SendMessageStream(context.Background(), "prompt", []chatstore.ChatMessage{
+		{Role: "user", Content: "hello"},
+	}, []domain.ToolDeclaration{
+		{Name: "tool_a"},
+		{Name: "tool_b"},
+		{Name: "tool_c"},
+	})
+
+	if m.sendStreamCalls != 1 {
+		t.Errorf("sendStreamCalls = %d, want 1", m.sendStreamCalls)
+	}
+	if len(m.sendStreamToolCounts) != 1 || m.sendStreamToolCounts[0] != 3 {
+		t.Errorf("sendStreamToolCounts = %v, want [3]", m.sendStreamToolCounts)
+	}
+
+	// Call with 0 tools
+	_, _ = m.SendMessageStream(context.Background(), "prompt", nil, nil)
+
+	if m.sendStreamCalls != 2 {
+		t.Errorf("sendStreamCalls = %d after second call, want 2", m.sendStreamCalls)
+	}
+	if len(m.sendStreamToolCounts) != 2 || m.sendStreamToolCounts[1] != 0 {
+		t.Errorf("sendStreamToolCounts = %v, want [3, 0]", m.sendStreamToolCounts)
+	}
+}
+
+// TestMockSenseiProvider_SendMessageStream_ContextPassed verifies that the
+// context is passed through to the mockStreamResponse.
+func TestMockSenseiProvider_SendMessageStream_ContextPassed(t *testing.T) {
+	var capturedCtx context.Context
+	m := &mockSenseiProvider{
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			capturedCtx = ctx
+			ch := make(chan ports.StreamChunk)
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	type ctxKey struct{}
+	testCtx := context.WithValue(context.Background(), ctxKey{}, "test-value")
+	ch, err := m.SendMessageStream(testCtx, "Sos un sensei.", nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range ch {
+	}
+	if capturedCtx == nil {
+		t.Fatal("context was not captured")
+	}
+	if capturedCtx.Value(ctxKey{}) != "test-value" {
+		t.Error("context value not preserved")
 	}
 }

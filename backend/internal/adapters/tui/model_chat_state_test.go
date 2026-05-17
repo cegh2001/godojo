@@ -461,3 +461,22 @@ func TestModel_CtrlN_OnlyInChat(t *testing.T) {
 		t.Error("ctrl+n should not have effect outside of sensei chat")
 	}
 }
+
+// --- Task 2: SendMessageStream tests on stubSenseiProvider ---
+
+// TestStubSenseiProvider_SendMessageStream_NotImplemented verifies that the
+// stub returns nil channel and a "not implemented" error.
+func TestStubSenseiProvider_SendMessageStream_NotImplemented(t *testing.T) {
+	s := stubSenseiProvider{}
+
+	ch, err := s.SendMessageStream(context.Background(), "Sos un sensei.", nil, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "not implemented" {
+		t.Errorf("error = %q, want %q", err.Error(), "not implemented")
+	}
+	if ch != nil {
+		t.Error("channel should be nil on not-implemented stub")
+	}
+}

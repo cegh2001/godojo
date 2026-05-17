@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"godojo/internal/adapters/chatstore"
@@ -48,6 +49,9 @@ type Model struct {
 	chatScroll    int
 	chatSessionID string
 	chatPrunedMsg string // notification about pruned session
+
+	// Streaming state
+	chatStreamingText strings.Builder // accumulates progressive stream text
 }
 
 // toolStatusMsg carries a status update during agent loop.
@@ -73,6 +77,19 @@ type chatResponseMsg struct {
 type chatSessionsLoadedMsg struct {
 	sessions []chatstore.ChatSession
 	err      error
+}
+
+// streamLineMsg carries a single line of streaming text from the sensei.
+type streamLineMsg struct {
+	text string
+}
+
+// streamCompleteMsg signals that the streaming response has finished.
+type streamCompleteMsg struct{}
+
+// streamSubscriptionMsg carries the live status channel from ProcessMessage.
+type streamSubscriptionMsg struct {
+	ch <-chan string
 }
 
 // NewModel creates a new TUI Model with SenseiService and chat dependencies.

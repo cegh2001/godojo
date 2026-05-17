@@ -20,9 +20,12 @@ const (
 	maxChatMessagePromptRunes  = 360
 	maxChatMessageSummaryRunes = 140
 	defaultChatModel           = "gemma-4-31b-it"
+	defaultFastModel           = "gemma-4-26b-a4b-it"
 	defaultSenseiTimeout       = 30 * time.Second
 	defaultSenseiToolTimeout   = 60 * time.Second
 	senseiModelEnv             = "GODOJO_SENSEI_MODEL"
+	senseiFastModelEnv         = "GODOJO_SENSEI_FAST_MODEL"
+	senseiFlashModelEnv        = "GODOJO_SENSEI_FLASH_MODEL"
 	senseiTimeoutEnv           = "GODOJO_SENSEI_TIMEOUT_SECONDS"
 	senseiToolTimeoutEnv       = "GODOJO_SENSEI_TOOL_TIMEOUT_SECONDS"
 )
@@ -50,6 +53,8 @@ type GenaiProvider struct {
 	client      *g.Client
 	apiKey      string
 	model       string
+	fastModel   string
+	flashModel  string
 	timeout     time.Duration
 	toolTimeout time.Duration
 }
@@ -59,9 +64,13 @@ type GenaiProvider struct {
 func NewGenaiProvider() *GenaiProvider {
 	timeout, toolTimeout := loadSenseiTimeoutsFromEnv()
 	model := resolveModelFromEnv()
+	fastModel := resolveModelFromEnvOrDefault(senseiFastModelEnv, defaultFastModel)
+	flashModel := strings.TrimSpace(os.Getenv(senseiFlashModelEnv))
 	return &GenaiProvider{
 		apiKey:      os.Getenv("GEMINI_API_KEY"),
 		model:       model,
+		fastModel:   fastModel,
+		flashModel:  flashModel,
 		timeout:     timeout,
 		toolTimeout: toolTimeout,
 	}
@@ -94,7 +103,8 @@ func (p *GenaiProvider) SendMessage(ctx context.Context, systemPrompt string, hi
 		return nil, err
 	}
 
-	resp, err := p.client.Models.GenerateContent(ctx, p.model, contents, config)
+	effectiveModel := selectEffectiveModel(tools, history, p.fastModel, p.flashModel, p.model)
+	resp, err := p.client.Models.GenerateContent(ctx, effectiveModel, contents, config)
 	if err != nil {
 		return nil, fmt.Errorf("error del sensei: %w", err)
 	}
@@ -370,6 +380,13 @@ func resolveModelFromEnv() string {
 	return defaultChatModel
 }
 
+func resolveModelFromEnvOrDefault(envVar, defaultVal string) string {
+	if model := strings.TrimSpace(os.Getenv(envVar)); model != "" {
+		return model
+	}
+	return defaultVal
+}
+
 func loadSenseiTimeoutsFromEnv() (time.Duration, time.Duration) {
 	timeout := envDurationSecondsOrDefault(senseiTimeoutEnv, defaultSenseiTimeout)
 	toolTimeout := envDurationSecondsOrDefault(senseiToolTimeoutEnv, defaultSenseiToolTimeout)
@@ -389,4 +406,52 @@ func envDurationSecondsOrDefault(name string, defaultValue time.Duration) time.D
 		return defaultValue
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+// --- Model selection ---
+
+// senseiFlashIntentHints contains Spanish patterns that indicate a simple intent
+// suitable for the flash model. The last user message is checked (lowercased).
+var senseiFlashIntentHints = []string{
+	"hola", "holi", "chau", "adiós", "qué tal", "que tal",
+	"qué podés hacer", "que podes hacer", "ayuda", "quién sos",
+	"quien sos", "gracias", "buenas", "buen día",
+}
+
+// selectEffectiveModel chooses which model to use based on tools and intent.
+// - tools present → heavy model (tool-enabled requests)
+// - no tools + flash configured + simple intent → flash model
+// - no tools → fast model
+func selectEffectiveModel(tools []domain.ToolDeclaration, history []chatstore.ChatMessage, fastModel, flashModel, heavyModel string) string {
+	if len(tools) > 0 {
+		return heavyModel
+	}
+	if flashModel != "" && isSimpleIntent(history) {
+		return flashModel
+	}
+	return fastModel
+}
+
+// isSimpleIntent checks if the last user message matches a flash intent hint.
+func isSimpleIntent(history []chatstore.ChatMessage) bool {
+	if len(history) == 0 {
+		return false
+	}
+	// Find the last user message
+	var lastUser string
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			lastUser = strings.ToLower(strings.TrimSpace(history[i].Content))
+			break
+		}
+	}
+	if lastUser == "" {
+		return false
+	}
+	for _, hint := range senseiFlashIntentHints {
+		if strings.Contains(lastUser, hint) {
+			return true
+		}
+	}
+	return false
 }

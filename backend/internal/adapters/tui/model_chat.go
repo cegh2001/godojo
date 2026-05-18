@@ -155,7 +155,7 @@ func (m Model) handleStreamLine(text string) Model {
 		})
 		m.chatLoading = false
 		m.chatScroll = 0
-		m.chatStreamingText.Reset()
+		m.chatStreamingText = ""
 		m.saveCurrentChatSession()
 		return m
 	case strings.HasPrefix(text, "error:"):
@@ -166,14 +166,14 @@ func (m Model) handleStreamLine(text string) Model {
 			Time:    timeNow(),
 		})
 		m.chatLoading = false
-		m.chatStreamingText.Reset()
+		m.chatStreamingText = ""
 		return m
 	case strings.HasPrefix(text, "Métricas:"):
 		m.toolStatus = text
 		return m
 	case strings.HasPrefix(text, "stream:"):
 		chunk := strings.TrimPrefix(text, "stream:")
-		m.chatStreamingText.WriteString(chunk)
+		m.chatStreamingText += chunk
 		return m
 	default:
 		m.toolStatus = text

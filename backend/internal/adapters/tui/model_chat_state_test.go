@@ -501,16 +501,16 @@ func TestModel_StreamLine_AccumulatesText(t *testing.T) {
 	newM, _ := m.Update(streamLineMsg{text: "stream:Hola"})
 	updated := newM.(Model)
 
-	if updated.chatStreamingText.String() != "Hola" {
-		t.Errorf("chatStreamingText = %q, want %q", updated.chatStreamingText.String(), "Hola")
+	if updated.chatStreamingText != "Hola" {
+		t.Errorf("chatStreamingText = %q, want %q", updated.chatStreamingText, "Hola")
 	}
 
 	// Send another chunk — should accumulate
 	newM2, _ := updated.Update(streamLineMsg{text: "stream: mundo"})
 	updated2 := newM2.(Model)
 
-	if updated2.chatStreamingText.String() != "Hola mundo" {
-		t.Errorf("chatStreamingText after second chunk = %q, want %q", updated2.chatStreamingText.String(), "Hola mundo")
+	if updated2.chatStreamingText != "Hola mundo" {
+		t.Errorf("chatStreamingText after second chunk = %q, want %q", updated2.chatStreamingText, "Hola mundo")
 	}
 }
 
@@ -545,8 +545,8 @@ func TestModel_StreamDone_ThenDoneMessage_Finalizes(t *testing.T) {
 	if updated4.chatLoading {
 		t.Error("chatLoading should be false after done: message")
 	}
-	if updated4.chatStreamingText.String() != "" {
-		t.Errorf("chatStreamingText should be reset after done, got %q", updated4.chatStreamingText.String())
+	if updated4.chatStreamingText != "" {
+		t.Errorf("chatStreamingText should be reset after done, got %q", updated4.chatStreamingText)
 	}
 	if len(updated4.chatMessages) != 2 {
 		t.Fatalf("expected 2 messages (user + sensei), got %d", len(updated4.chatMessages))

@@ -187,8 +187,8 @@ func (m Model) renderChatInputLine() string {
 
 func (m Model) renderChatStatusLine() string {
 	if m.chatLoading {
-		if m.chatStreamingText.Len() > 0 {
-			return senseiStyle.Render("🤖 Sensei: ") + m.chatStreamingText.String()
+		if m.chatStreamingText != "" {
+			return senseiStyle.Render("🤖 Sensei: ") + m.chatStreamingText
 		}
 		return spinnerStyle.Render("🤖 Sensei pensando...")
 	}

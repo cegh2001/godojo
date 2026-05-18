@@ -249,15 +249,15 @@ func TestModel_ChatStreamingText_FieldPresent(t *testing.T) {
 	m := newModelTest()
 
 	// Zero value check
-	if m.chatStreamingText.Len() != 0 {
-		t.Errorf("initial chatStreamingText length = %d, want 0", m.chatStreamingText.Len())
+	if m.chatStreamingText != "" {
+		t.Errorf("initial chatStreamingText = %q, want empty", m.chatStreamingText)
 	}
 
 	// Write something and verify
-	m.chatStreamingText.WriteString("Hola ")
-	m.chatStreamingText.WriteString("mundo")
+	m.chatStreamingText += "Hola "
+	m.chatStreamingText += "mundo"
 
-	if m.chatStreamingText.String() != "Hola mundo" {
-		t.Errorf("chatStreamingText = %q, want %q", m.chatStreamingText.String(), "Hola mundo")
+	if m.chatStreamingText != "Hola mundo" {
+		t.Errorf("chatStreamingText = %q, want %q", m.chatStreamingText, "Hola mundo")
 	}
 }

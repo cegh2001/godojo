@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"time"
 
 	"godojo/internal/adapters/chatstore"
@@ -51,7 +50,7 @@ type Model struct {
 	chatPrunedMsg string // notification about pruned session
 
 	// Streaming state
-	chatStreamingText strings.Builder // accumulates progressive stream text
+	chatStreamingText string // accumulates progressive stream text
 	streamCh          <-chan string   // live status channel for recursive TUI reads
 }
 

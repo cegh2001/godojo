@@ -387,7 +387,7 @@ func TestChatView_StreamingTextVisible(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.chatLoading = true
-	m.chatStreamingText.WriteString("Hola mu")
+	m.chatStreamingText = "Hola mu"
 
 	view := m.View()
 	if !strings.Contains(view, "Hola mu") {
@@ -418,10 +418,10 @@ func TestChatView_StreamingTextVisible_AccumulatesMultipleChunks(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.chatLoading = true
-	m.chatStreamingText.WriteString("Hola ")
-	m.chatStreamingText.WriteString("mundo ")
-	m.chatStreamingText.WriteString("desde ")
-	m.chatStreamingText.WriteString("GoDojo")
+	m.chatStreamingText = "Hola "
+	m.chatStreamingText += "mundo "
+	m.chatStreamingText += "desde "
+	m.chatStreamingText += "GoDojo"
 
 	view := m.View()
 	if !strings.Contains(view, "Hola mundo desde GoDojo") {
@@ -438,7 +438,7 @@ func TestChatView_StreamingText_NotVisibleWhenComplete(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.chatLoading = false
-	m.chatStreamingText.WriteString("Hola mu")
+	m.chatStreamingText = "Hola mu"
 
 	view := m.View()
 	if strings.Contains(view, "Hola mu") {

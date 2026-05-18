@@ -494,3 +494,64 @@ func TestSelectEffectiveModel_EmptyHistory_UsesFast(t *testing.T) {
 		t.Errorf("empty history with no tools, got %q, want fast-model", result)
 	}
 }
+
+// --- SendMessageStream tests ---
+
+func TestGenaiProvider_SendMessageStream_RejectsTools(t *testing.T) {
+	p := &GenaiProvider{apiKey: "test-key"}
+
+	tools := []domain.ToolDeclaration{{Name: "test_tool"}}
+	_, err := p.SendMessageStream(context.Background(), "Sos un sensei.", nil, tools)
+	if err == nil {
+		t.Fatal("expected error when tools provided to streaming")
+	}
+	if !strings.Contains(err.Error(), "streaming") || !strings.Contains(err.Error(), "tools") {
+		t.Errorf("expected error about streaming with tools, got %q", err.Error())
+	}
+}
+
+func TestGenaiProvider_SendMessageStream_MissingAPIKey(t *testing.T) {
+	p := &GenaiProvider{apiKey: ""}
+
+	_, err := p.SendMessageStream(context.Background(), "Sos un sensei.", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+	if !strings.Contains(err.Error(), "GEMINI_API_KEY") {
+		t.Errorf("expected error mentioning GEMINI_API_KEY, got %q", err.Error())
+	}
+}
+
+func TestGenaiProvider_SendMessageStream_ContextTimeout(t *testing.T) {
+	p := &GenaiProvider{apiKey: "test-key"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // immediately cancel
+
+	_, err := p.SendMessageStream(ctx, "Sos un sensei.", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	// The error should NOT be the stub "not yet implemented"
+	if strings.Contains(err.Error(), "not yet implemented") {
+		t.Fatalf("expected context cancellation error, got stub error: %q", err.Error())
+	}
+}
+
+func TestGenaiProvider_SendMessageStream_ModelSelection_PassesToolsCheck(t *testing.T) {
+	// When tools == nil, the method should NOT return "streaming not supported with tools".
+	// It should proceed past the tools guard — the error should be about the API key,
+	// NOT about tools or "not yet implemented".
+	p := &GenaiProvider{apiKey: ""}
+
+	_, err := p.SendMessageStream(context.Background(), "Sos un sensei.", nil, nil)
+	if err == nil {
+		t.Fatal("expected an error (no API key)")
+	}
+	if strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("expected real implementation, got stub error: %q", err.Error())
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "streaming not supported") {
+		t.Errorf("expected no tools rejection, got: %q", err.Error())
+	}
+}

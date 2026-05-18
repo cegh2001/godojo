@@ -378,3 +378,73 @@ func TestViewSenseiChat_ShowsSessionName(t *testing.T) {
 		t.Error("chat view should show current session name")
 	}
 }
+
+// --- Task 9: Streaming display tests ---
+
+func TestChatView_StreamingTextVisible(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 80
+	m.height = 24
+	m.chatLoading = true
+	m.chatStreamingText.WriteString("Hola mu")
+
+	view := m.View()
+	if !strings.Contains(view, "Hola mu") {
+		t.Error("chat view should show streaming text when loading and text accumulated")
+	}
+	if strings.Contains(view, "pensando") {
+		t.Error("chat view should NOT show 'pensando' when streaming text is present")
+	}
+}
+
+func TestChatView_PensandoWhenLoadingNoStream(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 80
+	m.height = 24
+	m.chatLoading = true
+	// chatStreamingText is empty
+
+	view := m.View()
+	if !strings.Contains(view, "pensando") {
+		t.Error("chat view should show 'pensando...' when loading with no streaming text")
+	}
+}
+
+func TestChatView_StreamingTextVisible_AccumulatesMultipleChunks(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 80
+	m.height = 24
+	m.chatLoading = true
+	m.chatStreamingText.WriteString("Hola ")
+	m.chatStreamingText.WriteString("mundo ")
+	m.chatStreamingText.WriteString("desde ")
+	m.chatStreamingText.WriteString("GoDojo")
+
+	view := m.View()
+	if !strings.Contains(view, "Hola mundo desde GoDojo") {
+		t.Error("chat view should show full accumulated streaming text from multiple chunks")
+	}
+	if strings.Contains(view, "pensando") {
+		t.Error("chat view should NOT show 'pensando' when streaming text accumulated from multiple chunks")
+	}
+}
+
+func TestChatView_StreamingText_NotVisibleWhenComplete(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.width = 80
+	m.height = 24
+	m.chatLoading = false
+	m.chatStreamingText.WriteString("Hola mu")
+
+	view := m.View()
+	if strings.Contains(view, "Hola mu") {
+		t.Error("chat view should NOT show streaming text when not loading")
+	}
+	if !strings.Contains(view, "Enter: enviar") {
+		t.Error("chat view should show normal status line when not loading")
+	}
+}

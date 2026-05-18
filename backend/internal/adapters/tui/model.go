@@ -52,6 +52,7 @@ type Model struct {
 
 	// Streaming state
 	chatStreamingText strings.Builder // accumulates progressive stream text
+	streamCh          <-chan string   // live status channel for recursive TUI reads
 }
 
 // toolStatusMsg carries a status update during agent loop.
@@ -160,6 +161,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case chatSessionsLoadedMsg:
 		return m.handleChatSessionsLoaded(msg)
+
+	case streamSubscriptionMsg:
+		m.streamCh = msg.ch
+		return m, streamReaderCmd(msg.ch)
+
+	case streamLineMsg:
+		return m.handleStreamLine(msg.text), streamReaderCmd(m.streamCh)
+
+	case streamCompleteMsg:
+		m.streamCh = nil
+		return m, nil
 
 	case spinner.TickMsg:
 		if m.state == stateToolRunning || (m.state == stateSenseiChat && m.chatLoading) {

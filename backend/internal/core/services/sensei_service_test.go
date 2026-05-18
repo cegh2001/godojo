@@ -436,10 +436,11 @@ func TestSenseiService_NewIntentHints(t *testing.T) {
 
 	// Messages with new intent hints should trigger tool-enabled requests
 	// "probar" is one of the new hints
-	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Probalo ejecutando los tests", newMockSession("s-hints"))
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Probalo ejecutando los tests", newMockSession("s-hints"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	response, _ := drainStatusChannel(statusCh)
 	if response != "Voy a ejecutar los tests." {
 		t.Fatalf("response = %q", response)
 	}
@@ -510,14 +511,39 @@ func newMockSession(id string) *chatstore.ChatSession {
 	}
 }
 
+// drainStatusChannel reads the live status channel produced by ProcessMessage
+// and extracts the final response text and a list of status messages.
+// It preserves the same extraction logic that the old ProcessMessage internal
+// drainer used, so existing test assertions continue to work.
+func drainStatusChannel(ch <-chan string) (response string, statuses []string) {
+	for msg := range ch {
+		switch {
+		case strings.HasPrefix(msg, "done:"):
+			response = strings.TrimPrefix(msg, "done:")
+		case strings.HasPrefix(msg, "error:"):
+			response = strings.TrimPrefix(msg, "error:")
+			statuses = append(statuses, "Error: "+response)
+		case strings.HasPrefix(msg, "stream:"):
+			// ignore stream chunks in tests
+		default:
+			statuses = append(statuses, msg)
+		}
+	}
+	return
+}
+
 // --- Test Cases ---
 
 // TestSenseiService_TextOnlyResponse tests the simplest case:
-// user sends message, provider returns text → service returns text.
+// user sends message, provider streams text → service returns text.
 func TestSenseiService_TextOnlyResponse(t *testing.T) {
 	provider := &mockSenseiProvider{
-		responses: [][]domain.ContentPart{
-			{textPart("¡Buenas! ¿En qué te ayudo con Go?")},
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, 2)
+			ch <- ports.StreamChunk{Text: "¡Buenas! ¿En qué te ayudo con Go?"}
+			ch <- ports.StreamChunk{Done: true}
+			close(ch)
+			return ch, nil
 		},
 	}
 	tools := core.NewToolRegistry()
@@ -528,27 +554,18 @@ func TestSenseiService_TextOnlyResponse(t *testing.T) {
 	session := newMockSession("s1")
 	ctx := context.Background()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Hola", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Hola", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Collect all status updates
-	var statuses []string
-	done := make(chan struct{})
-	go func() {
-		for s := range statusCh {
-			statuses = append(statuses, s)
-		}
-		close(done)
-	}()
-	<-done
+	response, statuses := drainStatusChannel(statusCh)
 
 	if response != "¡Buenas! ¿En qué te ayudo con Go?" {
 		t.Errorf("response = %q, want greeting", response)
 	}
-	if len(provider.sendToolCounts) != 1 || provider.sendToolCounts[0] != 0 {
-		t.Fatalf("first SendMessage tools = %v, want [0]", provider.sendToolCounts)
+	if len(provider.sendStreamToolCounts) != 1 || provider.sendStreamToolCounts[0] != 0 {
+		t.Fatalf("first SendMessageStream tools = %v, want [0]", provider.sendStreamToolCounts)
 	}
 
 	// Should have "Pensando..." and "done" statuses
@@ -568,10 +585,11 @@ func TestSenseiService_StartsWithToolsForWorkspaceIntent(t *testing.T) {
 	roadmap := services.NewRoadmapService()
 	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
-	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-fast-tools"))
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-fast-tools"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	response, _ := drainStatusChannel(statusCh)
 	if response != "Primero voy a revisar tu workspace." {
 		t.Fatalf("response = %q", response)
 	}
@@ -619,15 +637,12 @@ func TestSenseiService_SingleToolCall(t *testing.T) {
 	session := newMockSession("s2")
 	ctx := context.Background()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Creá un hola mundo", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Creá un hola mundo", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var statuses []string
-	for s := range statusCh {
-		statuses = append(statuses, s)
-	}
+	response, statuses := drainStatusChannel(statusCh)
 
 	if response != "Listo, creé el archivo hola.go en tu workspace." {
 		t.Errorf("response = %q", response)
@@ -668,10 +683,11 @@ func TestSenseiService_ListWorkspaceFilesTool(t *testing.T) {
 	roadmap := services.NewRoadmapService()
 	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
-	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-workspace-list"))
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo en el workspace?", newMockSession("s-workspace-list"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	response, _ := drainStatusChannel(statusCh)
 	if response != "Tenés archivos en el workspace." {
 		t.Fatalf("response = %q", response)
 	}
@@ -706,10 +722,11 @@ func TestSenseiService_ReadWorkspaceFileTool(t *testing.T) {
 	roadmap := services.NewRoadmapService()
 	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
 
-	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Revisá mi archivo", newMockSession("s-workspace-read"))
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Revisá mi archivo", newMockSession("s-workspace-read"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	response, _ := drainStatusChannel(statusCh)
 	if response != "Revisé el archivo del workspace." {
 		t.Fatalf("response = %q", response)
 	}
@@ -746,10 +763,11 @@ func TestSenseiService_ReadRecentWorkspaceFileTool(t *testing.T) {
 	roadmap := services.NewRoadmapService()
 	svc := services.NewSenseiService(provider, core.NewToolRegistry(), ws, roadmap, nil)
 
-	response, _, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Empecemos con tipos y luego revisalo", newMockSession("s-workspace-recent"))
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Empecemos con tipos y luego revisalo", newMockSession("s-workspace-recent"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	response, _ := drainStatusChannel(statusCh)
 	if response != "Leí el archivo reciente y puedo revisarlo contigo." {
 		t.Fatalf("response = %q", response)
 	}
@@ -795,15 +813,12 @@ func TestSenseiService_TopicFolderFromRoadmap(t *testing.T) {
 	session := newMockSession("topic-folder")
 	ctx := context.Background()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Armame ejercicios de variables", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Armame ejercicios de variables", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var statuses []string
-	for s := range statusCh {
-		statuses = append(statuses, s)
-	}
+	response, statuses := drainStatusChannel(statusCh)
 
 	if response != "Creé el ejercicio dentro de variables/." {
 		t.Errorf("response = %q", response)
@@ -878,15 +893,12 @@ func TestSenseiService_MultiToolSequential(t *testing.T) {
 	session := newMockSession("s3")
 	ctx := context.Background()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Dame ejercicios de fase 1", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Dame ejercicios de fase 1", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var statuses []string
-	for s := range statusCh {
-		statuses = append(statuses, s)
-	}
+	response, statuses := drainStatusChannel(statusCh)
 
 	if response != "Creé el ejercicio. ¿Lo ejecutamos?" {
 		t.Errorf("response = %q", response)
@@ -947,15 +959,12 @@ func TestSenseiService_MaxRoundsExceeded(t *testing.T) {
 	session := newMockSession("s4")
 	ctx := context.Background()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Hola", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Creá archivos para probar los límites", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var statuses []string
-	for s := range statusCh {
-		statuses = append(statuses, s)
-	}
+	response, statuses := drainStatusChannel(statusCh)
 
 	// Should contain the exhausted message
 	if !strings.Contains(response, "reformulá") {
@@ -1012,15 +1021,12 @@ func TestSenseiService_ToolExecutionError(t *testing.T) {
 	session := newMockSession("s5")
 	ctx := context.Background()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Creá malo.txt", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Creá malo.txt", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var statuses []string
-	for s := range statusCh {
-		statuses = append(statuses, s)
-	}
+	response, _ := drainStatusChannel(statusCh)
 
 	if response != "Ese archivo no es .go. ¿Querés que cree hola.go mejor?" {
 		t.Errorf("response = %q", response)
@@ -1038,11 +1044,13 @@ func TestSenseiService_ToolExecutionError(t *testing.T) {
 	_ = foundErrorResponse
 }
 
-// TestSenseiService_ProviderError tests that when SendMessage returns an error,
+// TestSenseiService_ProviderError tests that when the stream returns an error,
 // it's propagated through the status channel.
 func TestSenseiService_ProviderError(t *testing.T) {
 	provider := &mockSenseiProvider{
-		err: errors.New("API no disponible"),
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			return nil, errors.New("API no disponible")
+		},
 	}
 
 	tools := core.NewToolRegistry()
@@ -1053,15 +1061,12 @@ func TestSenseiService_ProviderError(t *testing.T) {
 	session := newMockSession("s6")
 	ctx := context.Background()
 
-	_, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Hola", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Hola", session)
 	if err != nil {
 		t.Fatalf("unexpected construction error: %v", err)
 	}
 
-	var statuses []string
-	for s := range statusCh {
-		statuses = append(statuses, s)
-	}
+	_, statuses := drainStatusChannel(statusCh)
 
 	// Should have an error status
 	hasError := false
@@ -1109,18 +1114,15 @@ func TestSenseiService_StatusChannel(t *testing.T) {
 	session := newMockSession("s7")
 	ctx := context.Background()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Crea test.go", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Crea test.go", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	response, statuses := drainStatusChannel(statusCh)
+
 	if response != "¡Listo!" {
 		t.Errorf("response = %q", response)
-	}
-
-	var statuses []string
-	for s := range statusCh {
-		statuses = append(statuses, s)
 	}
 
 	// Expected sequence: Pensando... → Ejecutando create_exercise_file... → Pensando... → done
@@ -1157,8 +1159,12 @@ func TestSenseiService_StatusChannel(t *testing.T) {
 // We use a short timeout context to verify the loop terminates.
 func TestSenseiService_ContextTimeout(t *testing.T) {
 	provider := &mockSenseiProvider{
-		responses: [][]domain.ContentPart{
-			{textPart("Respuesta rápida")},
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, 2)
+			ch <- ports.StreamChunk{Text: "Respuesta rápida"}
+			ch <- ports.StreamChunk{Done: true}
+			close(ch)
+			return ch, nil
 		},
 	}
 	tools := core.NewToolRegistry()
@@ -1170,14 +1176,12 @@ func TestSenseiService_ContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	response, statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Hola", session)
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Hola", session)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Drain status channel
-	for range statusCh {
-	}
+	response, _ := drainStatusChannel(statusCh)
 
 	if response != "Respuesta rápida" {
 		t.Errorf("response = %q", response)
@@ -1187,8 +1191,12 @@ func TestSenseiService_ContextTimeout(t *testing.T) {
 // TestSenseiService_SessionMessagesPreserved tests that session messages are properly appended.
 func TestSenseiService_SessionMessagesPreserved(t *testing.T) {
 	provider := &mockSenseiProvider{
-		responses: [][]domain.ContentPart{
-			{textPart("Hola, ¿cómo va?")},
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, 2)
+			ch <- ports.StreamChunk{Text: "Hola, ¿cómo va?"}
+			ch <- ports.StreamChunk{Done: true}
+			close(ch)
+			return ch, nil
 		},
 	}
 	tools := core.NewToolRegistry()
@@ -1199,9 +1207,11 @@ func TestSenseiService_SessionMessagesPreserved(t *testing.T) {
 	session := newMockSession("s9")
 	ctx := context.Background()
 
-	_, statusCh, _ := svc.ProcessMessage(ctx, "Sos un sensei.", "Mi primer mensaje", session)
-	for range statusCh {
+	statusCh, err := svc.ProcessMessage(ctx, "Sos un sensei.", "Mi primer mensaje", session)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
+	_, _ = drainStatusChannel(statusCh)
 
 	// Should have user message + sensei response
 	if len(session.Messages) < 2 {
@@ -1343,6 +1353,197 @@ func TestMockSenseiProvider_SendMessageStream_TracksCalls(t *testing.T) {
 	}
 	if len(m.sendStreamToolCounts) != 2 || m.sendStreamToolCounts[1] != 0 {
 		t.Errorf("sendStreamToolCounts = %v, want [3, 0]", m.sendStreamToolCounts)
+	}
+}
+
+// --- Task 6 Tests: Streaming path in runAgentLoop ---
+
+// TestSenseiService_StreamingPath_UsedForTextOnly verifies that when tools==nil
+// (text-only request), SendMessageStream is called instead of SendMessage.
+func TestSenseiService_StreamingPath_UsedForTextOnly(t *testing.T) {
+	provider := &mockSenseiProvider{
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, 2)
+			ch <- ports.StreamChunk{Text: "¡Hola! Soy el sensei."}
+			ch <- ports.StreamChunk{Done: true}
+			close(ch)
+			return ch, nil
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
+
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Hola", newMockSession("s-stream-used"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	response, _ := drainStatusChannel(statusCh)
+	_ = response
+
+	// Streaming path must be used (SendMessageStream), NOT non-streaming (SendMessage)
+	if provider.sendCalls != 0 {
+		t.Errorf("sendCalls = %d, want 0 (should use SendMessageStream, not SendMessage)", provider.sendCalls)
+	}
+	if provider.sendStreamCalls == 0 {
+		t.Error("sendStreamCalls should be > 0 (SendMessageStream was not called for text-only)")
+	}
+}
+
+// TestSenseiService_StreamingPath_EmitsStreamChunks verifies that streaming
+// chunks are emitted through the status channel with "stream:" prefix,
+// followed by "stream:done" and final "done:" message.
+func TestSenseiService_StreamingPath_EmitsStreamChunks(t *testing.T) {
+	provider := &mockSenseiProvider{
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, 3)
+			ch <- ports.StreamChunk{Text: "Hola "}
+			ch <- ports.StreamChunk{Text: "mundo"}
+			ch <- ports.StreamChunk{Done: true}
+			close(ch)
+			return ch, nil
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
+
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Hola", newMockSession("s-stream-chunks"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Read all statuses including stream: prefixed ones
+	var statuses []string
+	for msg := range statusCh {
+		statuses = append(statuses, msg)
+	}
+
+	// Check stream chunks
+	hasStreamHola := false
+	hasStreamMundo := false
+	hasStreamDone := false
+	hasDoneResponse := false
+	for _, s := range statuses {
+		if s == "stream:Hola " {
+			hasStreamHola = true
+		}
+		if s == "stream:mundo" {
+			hasStreamMundo = true
+		}
+		if s == "stream:done" {
+			hasStreamDone = true
+		}
+		if s == "done:Hola mundo" {
+			hasDoneResponse = true
+		}
+	}
+
+	if !hasStreamHola {
+		t.Errorf("expected 'stream:Hola ', got: %v", statuses)
+	}
+	if !hasStreamMundo {
+		t.Errorf("expected 'stream:mundo', got: %v", statuses)
+	}
+	if !hasStreamDone {
+		t.Errorf("expected 'stream:done', got: %v", statuses)
+	}
+	if !hasDoneResponse {
+		t.Errorf("expected 'done:Hola mundo', got: %v", statuses)
+	}
+}
+
+// TestSenseiService_StreamingPath_ErrorInStream verifies that when the stream
+// returns an error chunk, the error is emitted through the status channel.
+func TestSenseiService_StreamingPath_ErrorInStream(t *testing.T) {
+	simulatedErr := errors.New("simulated stream failure")
+	provider := &mockSenseiProvider{
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, 1)
+			ch <- ports.StreamChunk{Error: simulatedErr, Done: true}
+			close(ch)
+			return ch, nil
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
+
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Hola", newMockSession("s-stream-err"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, statuses := drainStatusChannel(statusCh)
+	hasError := false
+	for _, s := range statuses {
+		if strings.Contains(s, "Error") || strings.Contains(s, "error") {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Errorf("expected error in statuses, got: %v", statuses)
+	}
+}
+
+// TestSenseiService_ToolPath_UsesNonStreaming verifies that when tools != nil
+// (tool-enabled request), the non-streaming SendMessage is still used.
+func TestSenseiService_ToolPath_UsesNonStreaming(t *testing.T) {
+	provider := &mockSenseiProvider{
+		responses: [][]domain.ContentPart{
+			{textPart("Revisando tu workspace...")},
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
+
+	// "archivo" is in tool intent hints → tools != nil
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "¿Qué archivos tengo?", newMockSession("s-tool-nonstream"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	response, _ := drainStatusChannel(statusCh)
+	if response != "Revisando tu workspace..." {
+		t.Errorf("response = %q, want %q", response, "Revisando tu workspace...")
+	}
+
+	// Non-streaming SendMessage must be used
+	if provider.sendCalls == 0 {
+		t.Error("sendCalls should be > 0 (SendMessage was not called for tool request)")
+	}
+	if provider.sendStreamCalls != 0 {
+		t.Errorf("sendStreamCalls = %d, want 0 (SendMessageStream should NOT be used for tool requests)", provider.sendStreamCalls)
+	}
+}
+
+// TestSenseiService_StreamingPath_EmptyResponse verifies that when the stream
+// produces zero text chunks, the default fallback message is used.
+func TestSenseiService_StreamingPath_EmptyResponse(t *testing.T) {
+	provider := &mockSenseiProvider{
+		mockStreamResponse: func(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+			ch := make(chan ports.StreamChunk, 1)
+			ch <- ports.StreamChunk{Done: true}
+			close(ch)
+			return ch, nil
+		},
+	}
+	tools := core.NewToolRegistry()
+	ws := newMockWorkspace()
+	roadmap := services.NewRoadmapService()
+	svc := services.NewSenseiService(provider, tools, ws, roadmap, nil)
+
+	statusCh, err := svc.ProcessMessage(context.Background(), "Sos un sensei.", "Hola", newMockSession("s-stream-empty"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	response, _ := drainStatusChannel(statusCh)
+	if !strings.Contains(response, "reformular") {
+		t.Errorf("expected default reformulate message for empty stream, got: %q", response)
 	}
 }
 

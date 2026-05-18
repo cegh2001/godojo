@@ -16,7 +16,7 @@ import (
 const (
 	maxAgentRounds       = 5
 	agentTimeout         = 60 * time.Second
-	statusChannelBufSize = 10
+	statusChannelBufSize = 50
 )
 
 var senseiToolIntentHints = []string{
@@ -132,9 +132,9 @@ func NewSenseiService(
 }
 
 // ProcessMessage handles a user message through the agent loop.
-// Returns the final text response and a buffered status channel with progress updates.
-// The status channel is pre-populated and closed when ProcessMessage returns.
-func (s *SenseiService) ProcessMessage(ctx context.Context, systemPrompt string, userMessage string, session *chatstore.ChatSession) (response string, statusUpdates <-chan string, err error) {
+// Returns a LIVE status channel that the caller can read progressively.
+// The channel is closed when the agent loop finishes.
+func (s *SenseiService) ProcessMessage(ctx context.Context, systemPrompt string, userMessage string, session *chatstore.ChatSession) (<-chan string, error) {
 	// Append user message to session
 	now := time.Now()
 	session.Messages = append(session.Messages, chatstore.ChatMessage{
@@ -143,40 +143,19 @@ func (s *SenseiService) ProcessMessage(ctx context.Context, systemPrompt string,
 		Time:    now,
 	})
 
-	// Apply timeout
+	// Apply timeout — cancel ownership moves into goroutine
 	ctx, cancel := context.WithTimeout(ctx, agentTimeout)
-	defer cancel()
 
-	// Internal status channel
-	internalCh := make(chan string, statusChannelBufSize)
+	// Live status channel with increased buffer for streaming
+	statusCh := make(chan string, statusChannelBufSize)
 
 	go func() {
-		defer close(internalCh)
-		s.runAgentLoop(ctx, systemPrompt, userMessage, session, internalCh)
+		defer close(statusCh)
+		defer cancel()
+		s.runAgentLoop(ctx, systemPrompt, userMessage, session, statusCh)
 	}()
 
-	// Collect statuses and final response
-	var statuses []string
-	for s := range internalCh {
-		if strings.HasPrefix(s, "done:") {
-			response = strings.TrimPrefix(s, "done:")
-			statuses = append(statuses, "done")
-		} else if strings.HasPrefix(s, "error:") {
-			response = strings.TrimPrefix(s, "error:")
-			statuses = append(statuses, "Error: "+response)
-		} else {
-			statuses = append(statuses, s)
-		}
-	}
-
-	// Return pre-populated closed channel
-	resultCh := make(chan string, len(statuses))
-	for _, s := range statuses {
-		resultCh <- s
-	}
-	close(resultCh)
-
-	return response, resultCh, nil
+	return statusCh, nil
 }
 
 // runAgentLoop executes the agent loop: send → parse → execute tools → repeat.
@@ -197,6 +176,46 @@ func (s *SenseiService) runAgentLoop(ctx context.Context, systemPrompt string, u
 		statusCh <- "Pensando..."
 		metrics.rounds++
 		metrics.providerCalls++
+
+		// Streaming path for text-only (no tools)
+		if len(toolDeclarations) == 0 {
+			chunkCh, streamErr := s.provider.SendMessageStream(ctx, systemPrompt, session.Messages, nil)
+			if streamErr != nil {
+				statusCh <- metrics.statusLine()
+				statusCh <- fmt.Sprintf("error:Error del sensei: %v", streamErr)
+				return
+			}
+
+			var sb strings.Builder
+			for chunk := range chunkCh {
+				if chunk.Error != nil {
+					statusCh <- metrics.statusLine()
+					statusCh <- fmt.Sprintf("error:Error del sensei: %v", chunk.Error)
+					return
+				}
+				if chunk.Done {
+					statusCh <- "stream:done"
+					break
+				}
+				sb.WriteString(chunk.Text)
+				statusCh <- "stream:" + chunk.Text
+			}
+
+			finalText := sb.String()
+			if finalText == "" {
+				finalText = "El sensei no tiene respuesta para eso. ¿Querés reformular la pregunta?"
+			}
+
+			session.Messages = append(session.Messages, chatstore.ChatMessage{
+				Role:    "sensei",
+				Content: finalText,
+				Time:    time.Now(),
+			})
+
+			statusCh <- metrics.statusLine()
+			statusCh <- "done:" + finalText
+			return
+		}
 
 		parts, err := s.provider.SendMessage(ctx, systemPrompt, session.Messages, toolDeclarations)
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"godojo/internal/adapters/chatstore"
 	"godojo/internal/core/domain"
+	"godojo/internal/core/ports"
 
 	g "google.golang.org/genai"
 )
@@ -130,6 +131,74 @@ func (p *GenaiProvider) SendMessage(ctx context.Context, systemPrompt string, hi
 	}
 
 	return PartsToDomain(filtered), nil
+}
+
+// SendMessageStream sends a message to the Gemini API using streaming and returns
+// a channel of StreamChunk. Streaming is only supported for text-only requests (no tools).
+func (p *GenaiProvider) SendMessageStream(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+	if len(tools) > 0 {
+		return nil, fmt.Errorf("streaming not supported with tools — use SendMessage for tool-enabled requests")
+	}
+
+	if p.apiKey == "" {
+		return nil, fmt.Errorf("Sensei no disponible — configura GEMINI_API_KEY en .env")
+	}
+
+	if systemPrompt == "" {
+		systemPrompt = senseiSystemPrompt
+	}
+
+	// Apply context timeout
+	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+
+	// Check context validity before launching background work
+	if err := ctx.Err(); err != nil {
+		cancel()
+		return nil, err
+	}
+
+	// Build contents and config
+	memory, contents := buildGenaiContents(history)
+	config := buildGenaiConfig(systemPrompt, memory, nil) // no tools
+
+	// Ensure client is initialized
+	if err := p.ensureClient(); err != nil {
+		cancel()
+		return nil, err
+	}
+
+	effectiveModel := selectEffectiveModel(nil, history, p.fastModel, p.flashModel, p.model)
+
+	// Launch goroutine that consumes the iter.Seq2 and feeds the channel.
+	// The goroutine owns the context cancel — do NOT defer cancel at function level.
+	ch := make(chan ports.StreamChunk, 10)
+	go func() {
+		defer cancel()
+		defer close(ch)
+
+		for resp, err := range p.client.Models.GenerateContentStream(ctx, effectiveModel, contents, config) {
+			if err != nil {
+				ch <- ports.StreamChunk{Error: err, Done: true}
+				return
+			}
+			if resp == nil || len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+				continue
+			}
+			for _, part := range resp.Candidates[0].Content.Parts {
+				if part.Thought {
+					continue
+				}
+				if part.Text == "" && part.FunctionCall == nil {
+					continue
+				}
+				ch <- ports.StreamChunk{Text: part.Text}
+			}
+		}
+
+		ch <- ports.StreamChunk{Done: true}
+	}()
+
+	return ch, nil
 }
 
 // SendFunctionResponse sends a function execution result back to the AI and returns the next response.

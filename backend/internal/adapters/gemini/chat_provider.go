@@ -18,6 +18,7 @@ import (
 
 	"godojo/internal/adapters/chatstore"
 	"godojo/internal/core/domain"
+	"godojo/internal/core/ports"
 )
 
 // ChatProvider handles chat conversations with Gemma via the Gemini API.
@@ -159,6 +160,12 @@ func (p *ChatProvider) SendMessage(ctx context.Context, systemPrompt string, his
 	}
 
 	return parts, nil
+}
+
+// SendMessageStream sends a message to the Gemini API using streaming and returns
+// a channel of StreamChunk. The actual implementation is in Task 4.
+func (p *ChatProvider) SendMessageStream(ctx context.Context, systemPrompt string, history []chatstore.ChatMessage, tools []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+	return nil, fmt.Errorf("SendMessageStream: not yet implemented")
 }
 
 func buildChatContents(history []chatstore.ChatMessage) []map[string]interface{} {

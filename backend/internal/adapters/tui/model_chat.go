@@ -87,29 +87,19 @@ func (m Model) handleChatSend() (tea.Model, tea.Cmd) {
 
 func (m Model) sendSenseiCmd(userMessage string, history []chatstore.ChatMessage) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
-
 		session := &chatstore.ChatSession{
 			ID:       m.chatSessionID,
 			Messages: history,
 		}
 
-		response, statusUpdates, err := m.senseiSvc.ProcessMessage(ctx, m.senseiSystemPrompt, userMessage, session)
-
-		var finalStatus string
-		if statusUpdates != nil {
-			for status := range statusUpdates {
-				if strings.HasPrefix(status, "Métricas:") {
-					finalStatus = status
-				}
-			}
-		}
-
+		statusCh, err := m.senseiSvc.ProcessMessage(context.Background(), m.senseiSystemPrompt, userMessage, session)
 		if err != nil {
-			return senseiResponseMsg{content: err.Error(), err: err, status: finalStatus}
+			return senseiResponseMsg{err: err}
 		}
 
-		return senseiResponseMsg{content: response, err: nil, status: finalStatus}
+		// Return the live channel via streamSubscriptionMsg — the Update function
+		// will launch streamReaderCmd to read it progressively.
+		return streamSubscriptionMsg{ch: statusCh}
 	}
 }
 
@@ -133,8 +123,62 @@ func (m Model) handleChatResponse(msg chatResponseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// streamReaderCmd reads one status line from the live channel.
+// Returns streamLineMsg if a line is available, or streamCompleteMsg if the channel is closed.
+func streamReaderCmd(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		text, ok := <-ch
+		if !ok {
+			return streamCompleteMsg{}
+		}
+		return streamLineMsg{text: text}
+	}
+}
+
 func normalizePastedChatInput(text string) string {
 	return strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(text)
+}
+
+// handleStreamLine processes a single status line from the live ProcessMessage channel.
+// It dispatches based on prefix: stream:, stream:done, done:, error:, Métricas:, or default.
+// Returns a streamReaderCmd to schedule the next read when streamCh is available.
+func (m Model) handleStreamLine(text string) Model {
+	switch {
+	case strings.HasPrefix(text, "stream:done"):
+		return m
+	case strings.HasPrefix(text, "done:"):
+		response := strings.TrimPrefix(text, "done:")
+		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
+			Role:    "sensei",
+			Content: response,
+			Time:    timeNow(),
+		})
+		m.chatLoading = false
+		m.chatScroll = 0
+		m.chatStreamingText.Reset()
+		m.saveCurrentChatSession()
+		return m
+	case strings.HasPrefix(text, "error:"):
+		msg := strings.TrimPrefix(text, "error:")
+		m.chatMessages = append(m.chatMessages, chatstore.ChatMessage{
+			Role:    "sensei",
+			Content: msg,
+			Time:    timeNow(),
+		})
+		m.chatLoading = false
+		m.chatStreamingText.Reset()
+		return m
+	case strings.HasPrefix(text, "Métricas:"):
+		m.toolStatus = text
+		return m
+	case strings.HasPrefix(text, "stream:"):
+		chunk := strings.TrimPrefix(text, "stream:")
+		m.chatStreamingText.WriteString(chunk)
+		return m
+	default:
+		m.toolStatus = text
+		return m
+	}
 }
 
 func (m Model) handleChatNew() (tea.Model, tea.Cmd) {

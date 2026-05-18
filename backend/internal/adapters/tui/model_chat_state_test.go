@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"godojo/internal/adapters/chatstore"
 	"godojo/internal/core"
 	"godojo/internal/core/domain"
+	"godojo/internal/core/ports"
+
 	"godojo/internal/core/services"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,6 +28,10 @@ func (s stubSenseiProvider) SendMessage(_ context.Context, _ string, _ []chatsto
 
 func (s stubSenseiProvider) SendFunctionResponse(_ context.Context, _ []chatstore.ChatMessage, _ string, _ string, _ interface{}) ([]domain.ContentPart, error) {
 	return s.parts, s.err
+}
+
+func (s stubSenseiProvider) SendMessageStream(_ context.Context, _ string, _ []chatstore.ChatMessage, _ []domain.ToolDeclaration) (<-chan ports.StreamChunk, error) {
+	return nil, errors.New("not implemented")
 }
 
 func TestModel_CtrlG_TransitionsToSenseiChat(t *testing.T) {
@@ -478,5 +485,131 @@ func TestStubSenseiProvider_SendMessageStream_NotImplemented(t *testing.T) {
 	}
 	if ch != nil {
 		t.Error("channel should be nil on not-implemented stub")
+	}
+}
+
+// --- Task 8: TUI streaming display tests ---
+
+// TestModel_StreamLine_AccumulatesText verifies that a streamLineMsg
+// with "stream:" prefix accumulates text in chatStreamingText.
+func TestModel_StreamLine_AccumulatesText(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatLoading = true
+
+	// Send a stream chunk
+	newM, _ := m.Update(streamLineMsg{text: "stream:Hola"})
+	updated := newM.(Model)
+
+	if updated.chatStreamingText.String() != "Hola" {
+		t.Errorf("chatStreamingText = %q, want %q", updated.chatStreamingText.String(), "Hola")
+	}
+
+	// Send another chunk — should accumulate
+	newM2, _ := updated.Update(streamLineMsg{text: "stream: mundo"})
+	updated2 := newM2.(Model)
+
+	if updated2.chatStreamingText.String() != "Hola mundo" {
+		t.Errorf("chatStreamingText after second chunk = %q, want %q", updated2.chatStreamingText.String(), "Hola mundo")
+	}
+}
+
+// TestModel_StreamDone_ThenDoneMessage_Finalizes verifies that after
+// "stream:done" followed by "done:Final", the message is appended
+// and chatLoading is set to false.
+func TestModel_StreamDone_ThenDoneMessage_Finalizes(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatLoading = true
+	m.chatSessionID = "stream-test"
+	now := time.Now()
+	m.chatMessages = []chatstore.ChatMessage{
+		{Role: "user", Content: "Hola", Time: now},
+	}
+
+	// Accumulate some streaming text first
+	newM, _ := m.Update(streamLineMsg{text: "stream:Hola "})
+	updated := newM.(Model)
+
+	newM2, _ := updated.Update(streamLineMsg{text: "stream:mundo"})
+	updated2 := newM2.(Model)
+
+	// Stream done
+	newM3, _ := updated2.Update(streamLineMsg{text: "stream:done"})
+	updated3 := newM3.(Model)
+
+	// Final done message
+	newM4, _ := updated3.Update(streamLineMsg{text: "done:Hola mundo"})
+	updated4 := newM4.(Model)
+
+	if updated4.chatLoading {
+		t.Error("chatLoading should be false after done: message")
+	}
+	if updated4.chatStreamingText.String() != "" {
+		t.Errorf("chatStreamingText should be reset after done, got %q", updated4.chatStreamingText.String())
+	}
+	if len(updated4.chatMessages) != 2 {
+		t.Fatalf("expected 2 messages (user + sensei), got %d", len(updated4.chatMessages))
+	}
+	if updated4.chatMessages[1].Role != "sensei" {
+		t.Errorf("last message role = %q, want sensei", updated4.chatMessages[1].Role)
+	}
+	if updated4.chatMessages[1].Content != "Hola mundo" {
+		t.Errorf("last message content = %q, want %q", updated4.chatMessages[1].Content, "Hola mundo")
+	}
+}
+
+// TestModel_StreamError_ShowsError verifies that an "error:" line
+// appends an error message and sets chatLoading to false.
+func TestModel_StreamError_ShowsError(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatLoading = true
+	m.chatSessionID = "stream-error-test"
+
+	newM, _ := m.Update(streamLineMsg{text: "error:API error"})
+	updated := newM.(Model)
+
+	if updated.chatLoading {
+		t.Error("chatLoading should be false after error")
+	}
+	if len(updated.chatMessages) != 1 {
+		t.Fatalf("expected 1 error message, got %d", len(updated.chatMessages))
+	}
+	if updated.chatMessages[0].Role != "sensei" {
+		t.Errorf("error message role = %q, want sensei", updated.chatMessages[0].Role)
+	}
+	if updated.chatMessages[0].Content != "API error" {
+		t.Errorf("error message content = %q, want %q", updated.chatMessages[0].Content, "API error")
+	}
+}
+
+// TestModel_StreamMetrics_StoresToolStatus verifies that a "Métricas:" line
+// is stored as toolStatus in the model.
+func TestModel_StreamMetrics_StoresToolStatus(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatLoading = true
+
+	newM, _ := m.Update(streamLineMsg{text: "Métricas: 1.2s · 1 ronda · 1 llamada al modelo · 0 herramientas"})
+	updated := newM.(Model)
+
+	if updated.toolStatus != "Métricas: 1.2s · 1 ronda · 1 llamada al modelo · 0 herramientas" {
+		t.Errorf("toolStatus = %q, want metrics string", updated.toolStatus)
+	}
+}
+
+// TestModel_StreamLine_UnknownPrefix_StoresAsToolStatus verifies that
+// lines with unrecognized prefixes (like "Pensando...") are stored as toolStatus.
+func TestModel_StreamLine_UnknownPrefix_StoresAsToolStatus(t *testing.T) {
+	m := newModelTest()
+	m.state = stateSenseiChat
+	m.chatLoading = true
+
+	newM, _ := m.Update(streamLineMsg{text: "Pensando..."})
+	updated := newM.(Model)
+
+	if updated.toolStatus != "Pensando..." {
+		t.Errorf("toolStatus = %q, want %q", updated.toolStatus, "Pensando...")
 	}
 }
